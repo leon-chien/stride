@@ -148,8 +148,7 @@ def main() -> None:
 
     X, y = build_windows(
         trajectories=trajectories,
-        target_center=sim_cfg.target_center,
-        target_radius=sim_cfg.target_radius,
+        cfg=sim_cfg,
         window_size=dataset_cfg["window_size"],
         horizon=dataset_cfg["horizon"],
         stride=dataset_cfg["stride"],
@@ -158,6 +157,9 @@ def main() -> None:
     print(f"X shape: {X.shape}")
     print(f"y shape: {y.shape}")
     print(f"Window positive rate: {y.mean():.3f}")
+    print(f"Event type: {sim_cfg.event_type}")
+    if sim_cfg.event_type == "upper_gate":
+        print(f"Gate y min: {sim_cfg.gate_y_min}")
 
     X_train, y_train, X_val, y_val, X_test, y_test = split_dataset(
         X,

@@ -12,7 +12,7 @@ from stride.features.toy2d import (
     distance_to_target,
     force,
     potential,
-    reaches_target,
+    reaches_event,
 )
 from stride.models.gru_ranker import GRURanker
 from stride.sampling.weighted_resampler import weighted_ensemble_resample
@@ -181,11 +181,10 @@ def step_we_walker(
 
     walker.history.append(feature)
 
-    if reaches_target(
-        walker.x,
-        walker.y,
-        sim_cfg.target_center,
-        sim_cfg.target_radius,
+    if reaches_event(
+        x=walker.x,
+        y=walker.y,
+        cfg=sim_cfg,
     ):
         walker.reached_target = True
 

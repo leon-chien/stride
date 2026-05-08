@@ -9,13 +9,20 @@ import numpy as np
 @dataclass
 class Toy2DConfig:
     num_trajectories: int = 1000
-    trajectory_length: int = 200
+    trajectory_length: int = 400
     dt: float = 0.02
-    noise_std: float = 0.25
+    noise_std: float = 0.75
     start_center: tuple[float, float] = (-1.0, 0.0)
     start_std: float = 0.08
     target_center: tuple[float, float] = (1.0, 0.0)
-    target_radius: float = 0.25
+    target_radius: float = 0.35
+
+    # Version 1.4 event definition.
+    # "distance" = old target event.
+    # "upper_gate" = close to target AND y > gate_y_min.
+    event_type: str = "distance"
+    gate_y_min: float = 0.15
+
     seed: int = 42
 
 
@@ -59,6 +66,39 @@ def reaches_target(
 ) -> bool | np.ndarray:
     return distance_to_target(x, y, target_center) < target_radius
 
+
+def reaches_event(
+    x: float | np.ndarray,
+    y: float | np.ndarray,
+    cfg: Toy2DConfig,
+) -> bool | np.ndarray:
+    """
+    Determine whether a frame satisfies the configured rare-event condition.
+
+    Version 1.4 supports a gated event:
+
+        distance_to_target < target_radius
+        AND
+        y > gate_y_min
+
+    This makes the toy benchmark harder because distance alone is no
+    longer a perfect progress coordinate.
+    """
+    close = reaches_target(
+        x=x,
+        y=y,
+        target_center=cfg.target_center,
+        target_radius=cfg.target_radius,
+    )
+
+    if cfg.event_type == "distance":
+        return close
+
+    if cfg.event_type == "upper_gate":
+        return close & (y > cfg.gate_y_min)
+
+    raise ValueError(f"Unknown event_type: {cfg.event_type}")
+    
 
 def simulate_trajectory(
     cfg: Toy2DConfig,
@@ -126,33 +166,33 @@ def simulate_dataset(cfg: Toy2DConfig) -> np.ndarray:
     return trajectories
 
 
-def trajectory_reached_target(
+def trajectory_reached_event(
     trajectory: np.ndarray,
-    target_center: tuple[float, float],
-    target_radius: float,
+    cfg: Toy2DConfig,
 ) -> bool:
     x = trajectory[:, 0]
     y = trajectory[:, 1]
-    reached = reaches_target(x, y, target_center, target_radius)
+
+    reached = reaches_event(x, y, cfg)
+
     return bool(np.any(reached))
 
 
 def event_rate(
     trajectories: np.ndarray,
-    target_center: tuple[float, float],
-    target_radius: float,
+    cfg: Toy2DConfig,
 ) -> float:
     events = [
-        trajectory_reached_target(traj, target_center, target_radius)
+        trajectory_reached_event(traj, cfg)
         for traj in trajectories
     ]
+
     return float(np.mean(events))
 
 
 def build_windows(
     trajectories: np.ndarray,
-    target_center: tuple[float, float],
-    target_radius: float,
+    cfg: Toy2DConfig,
     window_size: int,
     horizon: int,
     stride: int,
@@ -161,7 +201,11 @@ def build_windows(
     Convert trajectories into delayed-label supervised examples.
 
     X = recent trajectory window
-    y = whether target is reached within the next horizon frames
+    y = whether configured rare event is reached within the next horizon frames
+
+    Version 1.4 uses cfg.event_type, so labels can be:
+        - distance target
+        - gated target
     """
     xs: list[np.ndarray] = []
     ys: list[int] = []
@@ -181,11 +225,10 @@ def build_windows(
             future_x = future[:, 0]
             future_y = future[:, 1]
 
-            future_reached = reaches_target(
-                future_x,
-                future_y,
-                target_center,
-                target_radius,
+            future_reached = reaches_event(
+                x=future_x,
+                y=future_y,
+                cfg=cfg,
             )
 
             label = int(np.any(future_reached))

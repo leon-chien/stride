@@ -7,6 +7,8 @@ simulation:
   start_std: 0.08
   target_center: [1.0, 0.0]
   target_radius: 0.35
+  event_type: upper_gate
+  gate_y_min: 0.15
   seed: 42
 
 dataset:

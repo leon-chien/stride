@@ -27,16 +27,14 @@ def main() -> None:
 
     rate = event_rate(
         trajectories,
-        sim_cfg.target_center,
-        sim_cfg.target_radius,
+        sim_cfg,
     )
 
     dataset_cfg = config["dataset"]
 
     X, y = build_windows(
         trajectories=trajectories,
-        target_center=sim_cfg.target_center,
-        target_radius=sim_cfg.target_radius,
+        cfg=sim_cfg,
         window_size=dataset_cfg["window_size"],
         horizon=dataset_cfg["horizon"],
         stride=dataset_cfg["stride"],
@@ -48,6 +46,9 @@ def main() -> None:
     print(f"Window dataset X shape: {X.shape}")
     print(f"Window labels y shape: {y.shape}")
     print(f"Window positive rate: {y.mean():.3f}")
+    print(f"Event type: {sim_cfg.event_type}")
+    if sim_cfg.event_type == "upper_gate":
+        print(f"Gate y min: {sim_cfg.gate_y_min}")
 
     output_cfg = config["output"]
 
