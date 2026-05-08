@@ -22,3 +22,17 @@ Instead of manually defining only a distance, RMSD, angle, or contact coordinate
 
 ```text
 recent trajectory motion → future rare-event value → adaptive bin assignment
+```
+
+### Version 1: WE-style toy resampling
+
+STRIDE now supports a simplified weighted ensemble toy loop with weighted walkers, score-based bin assignment, within-bin resampling, and probability-weight conservation.
+
+On a 2D rare-event benchmark, model-score bins achieved higher final target-reaching probability weight than static distance bins:
+
+| Method | First reached iteration | Final target weight | Target walkers | Unique lineages |
+|---|---:|---:|---:|---:|
+| Static distance bins | 7 | 0.1250 | 32/256 | 8 |
+| STRIDE model-score bins | 10 | 0.2578 | 66/256 | 5 |
+
+This shows that learned trajectory-value bins can concentrate more probability weight into target-reaching regions, while also revealing a diversity tradeoff that motivates novelty- and uncertainty-aware binning.
