@@ -1,26 +1,24 @@
 # STRIDE
 
-Goal-conditioned online trajectory-value learning for adaptive weighted ensemble molecular dynamics.
+**Structured Trajectory Representation and Intelligent Dynamic Binning Engine**
 
-Stride (Simulation Trajectory Resampling Inference-Driven Ensemble)
+STRIDE is a machine learning system for **goal-conditioned rare-event molecular simulation**. The long-term goal is to build a WESTPA-native learned BinMapper that uses trajectory histories to generate adaptive progress-coordinate bins for weighted ensemble simulation.
 
-## Features
-- WESTPA integration
-- Adaptive ML-based binning
-- GNN + temporal transformer trajectory encoding
-- Online replay learning
-- Uncertainty-aware exploration
-- Language-conditioned simulation goals
+In plain terms:
 
-## Architecture
-(diagram)
+> STRIDE learns which simulation walkers are likely to become scientifically valuable, then converts those predictions into adaptive bins that WESTPA can use for weighted resampling.
 
-## Installation
+The current implementation contains a complete toy proof-of-concept: a 2D rare-event simulator, a GRU trajectory-value model, offline replay evaluation, and a first adaptive sampling controller.
 
-## Quickstart
+---
 
-## Results
+## Motivation
 
-## Roadmap
+Weighted ensemble methods such as WESTPA are powerful for rare-event molecular simulation, but their performance often depends heavily on the choice of progress coordinates and binning strategy.
 
-## Citation
+STRIDE aims to learn these binning signals from data.
+
+Instead of manually defining only a distance, RMSD, angle, or contact coordinate, STRIDE learns from trajectory histories:
+
+```text
+recent trajectory motion → future rare-event value → adaptive bin assignment
