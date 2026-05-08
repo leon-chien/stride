@@ -66,7 +66,13 @@ def main() -> None:
         segment_length=5,
         window_size=config["dataset"]["window_size"],
         num_bins=8,
+        num_score_bins=4,
+        num_distance_bins=4,
         target_per_bin=32,
+        diversity_priority_weight=0.4,
+        score_priority_weight=0.4,
+        probability_priority_weight=0.2,
+        min_count_per_bin=8,
         seed=123,
     )
 
@@ -79,7 +85,9 @@ def main() -> None:
     print(f"Hybrid score bins: {we_cfg.num_score_bins}")
     print(f"Hybrid distance bins: {we_cfg.num_distance_bins}")
     print(f"Target total walkers preserved per method: {we_cfg.num_walkers}")
-    print(f"Priority alpha: {we_cfg.priority_alpha}")
+    print(f"Diversity priority weight: {we_cfg.diversity_priority_weight}")
+    print(f"Score priority weight: {we_cfg.score_priority_weight}")
+    print(f"Probability priority weight: {we_cfg.probability_priority_weight}")
     print(f"Minimum walkers per occupied bin: {we_cfg.min_count_per_bin}")
     print(f"Num iterations: {we_cfg.num_iterations}")
     print(f"Segment length: {we_cfg.segment_length}")

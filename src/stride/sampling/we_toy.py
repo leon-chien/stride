@@ -68,9 +68,13 @@ class WEToyConfig:
     # Fallback target walkers per bin.
     target_per_bin: int = 32
 
-    # Version 1.2 priority-aware allocation settings.
-    priority_alpha: float = 0.7
-    min_count_per_bin: int = 4
+    # Version 1.3 priority-aware allocation settings.
+    # These replace the older single priority_alpha.
+    diversity_priority_weight: float = 0.4
+    score_priority_weight: float = 0.4
+    probability_priority_weight: float = 0.2
+
+    min_count_per_bin: int = 8
 
     seed: int = 123
 
@@ -364,40 +368,79 @@ def assign_hybrid_score_distance_bins(
     return combined_bin_ids.astype(int)
 
 
-def compute_score_based_bin_priorities(
+def compute_weight_aware_bin_priorities(
     bin_ids: np.ndarray,
     scores: np.ndarray,
-    alpha: float = 0.7,
+    weights: np.ndarray,
+    score_weight: float = 0.4,
+    probability_weight: float = 0.2,
+    diversity_weight: float = 0.4,
 ) -> dict[int, float]:
     """
-    Compute bin priorities from model scores.
+    Compute Version 1.3 weight-aware bin priorities.
 
-    Each bin priority combines:
+    The priority for each occupied bin combines:
 
-        1. a uniform diversity floor
-        2. the average model score in that bin
+        1. diversity priority:
+            every occupied bin receives baseline support
 
-    alpha controls exploitation:
+        2. score priority:
+            bins with higher mean model score receive more walkers
 
-        alpha = 0.0 → uniform allocation
-        alpha = 1.0 → fully score-driven allocation
+        3. probability-weight priority:
+            bins with more statistical probability mass receive more walkers
 
-    Recommended starting value:
+    This is more WESTPA-like than using model score alone.
 
-        alpha = 0.7
+    Formula:
 
-    This is Version 1.2's core improvement.
+        priority =
+            diversity_weight * uniform_priority
+          + score_weight * normalized_score_priority
+          + probability_weight * normalized_bin_weight_priority
+
+    Recommended starting values:
+
+        diversity_weight = 0.4
+        score_weight = 0.4
+        probability_weight = 0.2
+
+    Args:
+        bin_ids:
+            Integer bin IDs for each walker.
+        scores:
+            Model event probabilities for each walker.
+        weights:
+            Statistical probability weights for each walker.
+        score_weight:
+            How much to prioritize high model-score bins.
+        probability_weight:
+            How much to prioritize bins with high probability mass.
+        diversity_weight:
+            How much uniform support every occupied bin receives.
+
+    Returns:
+        Dictionary mapping bin_id -> priority.
     """
-    if not 0.0 <= alpha <= 1.0:
-        raise ValueError(f"alpha must be in [0, 1], got {alpha}")
-
     bin_ids = np.asarray(bin_ids, dtype=int)
     scores = np.asarray(scores, dtype=float)
+    weights = np.asarray(weights, dtype=float)
 
-    if bin_ids.shape != scores.shape:
+    if bin_ids.shape != scores.shape or bin_ids.shape != weights.shape:
         raise ValueError(
-            f"Shape mismatch: bin_ids has {bin_ids.shape}, scores has {scores.shape}"
+            "bin_ids, scores, and weights must have the same shape. "
+            f"Got {bin_ids.shape}, {scores.shape}, {weights.shape}."
         )
+
+    total_mix = score_weight + probability_weight + diversity_weight
+
+    if total_mix <= 0:
+        raise ValueError("At least one priority weight must be positive.")
+
+    # Normalize mixture coefficients to sum to one.
+    score_weight = score_weight / total_mix
+    probability_weight = probability_weight / total_mix
+    diversity_weight = diversity_weight / total_mix
 
     unique_bins = sorted(int(b) for b in np.unique(bin_ids))
     num_bins = len(unique_bins)
@@ -405,25 +448,44 @@ def compute_score_based_bin_priorities(
     if num_bins == 0:
         raise ValueError("No occupied bins.")
 
-    mean_scores = {}
+    uniform_priority = np.ones(num_bins, dtype=np.float64) / num_bins
+
+    mean_scores = []
+    bin_weights = []
 
     for bin_id in unique_bins:
         mask = bin_ids == bin_id
-        mean_scores[bin_id] = float(scores[mask].mean())
 
-    score_values = np.array([mean_scores[b] for b in unique_bins], dtype=np.float64)
+        mean_scores.append(float(scores[mask].mean()))
+        bin_weights.append(float(weights[mask].sum()))
 
-    # Normalize scores into a nonnegative priority distribution.
-    score_values = score_values - score_values.min()
+    mean_scores_array = np.array(mean_scores, dtype=np.float64)
+    bin_weights_array = np.array(bin_weights, dtype=np.float64)
 
-    if score_values.sum() > 0:
-        score_priority = score_values / score_values.sum()
+    # Convert model scores into a smooth priority distribution.
+    # Do not subtract the minimum aggressively; that caused unstable behavior.
+    score_priority = np.clip(mean_scores_array, 1e-8, None)
+
+    if score_priority.sum() > 0:
+        score_priority = score_priority / score_priority.sum()
     else:
-        score_priority = np.ones(num_bins, dtype=np.float64) / num_bins
+        score_priority = uniform_priority.copy()
 
-    uniform_priority = np.ones(num_bins, dtype=np.float64) / num_bins
+    # Convert bin probability mass into a priority distribution.
+    bin_weight_priority = np.clip(bin_weights_array, 1e-12, None)
 
-    mixed_priority = (1.0 - alpha) * uniform_priority + alpha * score_priority
+    if bin_weight_priority.sum() > 0:
+        bin_weight_priority = bin_weight_priority / bin_weight_priority.sum()
+    else:
+        bin_weight_priority = uniform_priority.copy()
+
+    mixed_priority = (
+        diversity_weight * uniform_priority
+        + score_weight * score_priority
+        + probability_weight * bin_weight_priority
+    )
+
+    mixed_priority = mixed_priority / mixed_priority.sum()
 
     return {
         bin_id: float(priority)
@@ -583,10 +645,13 @@ def run_we_toy_experiment(
         history.append(summary)
 
         if scores is not None:
-            bin_priorities = compute_score_based_bin_priorities(
+            bin_priorities = compute_weight_aware_bin_priorities(
                 bin_ids=bin_ids,
                 scores=scores,
-                alpha=we_cfg.priority_alpha,
+                weights=weights,
+                score_weight=we_cfg.score_priority_weight,
+                probability_weight=we_cfg.probability_priority_weight,
+                diversity_weight=we_cfg.diversity_priority_weight,
             )
         else:
             bin_priorities = None

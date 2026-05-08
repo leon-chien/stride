@@ -51,3 +51,5 @@ Three strategies were compared:
 | Hybrid score + distance bins | 6 | 0.7798 | 243/256 | 5 |
 
 Hybrid binning achieved a **6.24× higher final target-reaching probability weight** than static distance binning while preserving total probability weight at 1.0000. This supports STRIDE’s central design: learned trajectory-value signals should be combined with progress/diversity coordinates and used for priority-aware weighted ensemble binning.
+
+Version 1.3 introduced weight-aware bin priority allocation. Across 20 seeds, pure model-score bins improved early target discovery and unique-lineage diversity relative to static distance bins, but static distance bins remained slightly stronger in final target weight on the current toy problem. This suggests the learned model contains useful trajectory-value signal, while the simple distance-defined target makes static binning an unusually strong baseline. The next benchmark will introduce a gated/orientation-dependent rare event where distance alone is insufficient.
