@@ -36,3 +36,18 @@ On a 2D rare-event benchmark, model-score bins achieved higher final target-reac
 | STRIDE model-score bins | 10 | 0.2578 | 66/256 | 5 |
 
 This shows that learned trajectory-value bins can concentrate more probability weight into target-reaching regions, while also revealing a diversity tradeoff that motivates novelty- and uncertainty-aware binning.
+
+
+### Version 1.2: Priority-aware hybrid WE binning
+
+STRIDE now supports priority-aware weighted ensemble toy resampling. Instead of giving every occupied bin equal support, Version 1.2 allocates walkers using a diversity floor plus model-score-based bin priorities.
+
+Three strategies were compared:
+
+| Method | First reached iteration | Final target weight | Target walkers | Unique lineages |
+|---|---:|---:|---:|---:|
+| Static distance bins | 7 | 0.1250 | 32/256 | 8 |
+| Model-score bins | 9 | 0.0924 | 244/256 | 12 |
+| Hybrid score + distance bins | 6 | 0.7798 | 243/256 | 5 |
+
+Hybrid binning achieved a **6.24× higher final target-reaching probability weight** than static distance binning while preserving total probability weight at 1.0000. This supports STRIDE’s central design: learned trajectory-value signals should be combined with progress/diversity coordinates and used for priority-aware weighted ensemble binning.
