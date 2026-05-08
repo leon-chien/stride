@@ -1,0 +1,28 @@
+simulation:
+  num_trajectories: 1000
+  trajectory_length: 400
+  dt: 0.02
+  noise_std: 0.75
+  start_center: [-1.0, 0.0]
+  start_std: 0.08
+  target_center: [1.0, 0.0]
+  target_radius: 0.35
+  seed: 42
+
+dataset:
+  window_size: 25
+  horizon: 50
+  stride: 5
+
+output:
+  dir: outputs/toy2d
+  save_npz: true
+
+training:
+  batch_size: 128
+  epochs: 20
+  learning_rate: 0.001
+  hidden_dim: 128
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
