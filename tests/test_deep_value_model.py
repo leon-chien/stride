@@ -13,12 +13,12 @@ def test_goal_spec_feature_vector_is_deterministic() -> None:
     spec = GoalSpec.from_dict(
         {
             "goal": {
-                "name": "nacl_association",
-                "type": "distance_threshold",
-                "selection_a": "Na+",
-                "selection_b": "Cl-",
+                "name": "ligand_contact_asp42",
+                "type": "contact",
+                "selection_a": "ligand",
+                "selection_b": "ASP42",
                 "operator": "less_than",
-                "threshold": 0.35,
+                "threshold": 0.45,
                 "horizon_iterations": 50,
                 "value_target": "event_and_flux",
             }
@@ -29,7 +29,7 @@ def test_goal_spec_feature_vector_is_deterministic() -> None:
 
     assert features.dtype == np.float32
     assert features.shape == (spec.feature_dim,)
-    assert spec.selections == ("Na+", "Cl-")
+    assert spec.selections == ("ligand", "ASP42")
     assert np.array_equal(features, spec.to_feature_vector())
 
 
@@ -76,9 +76,9 @@ def test_stride_value_model_outputs_westpa_scoring_heads() -> None:
     torch.manual_seed(11)
 
     spec = GoalSpec(
-        name="toy_binding",
-        type="distance_threshold",
-        selections=("a", "b"),
+        name="ligand_binding",
+        type="contact",
+        selections=("ligand", "ASP42"),
         operator="less_than",
         threshold=0.4,
         horizon_iterations=25,

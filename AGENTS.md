@@ -23,20 +23,16 @@ molecular frames
 ```
 
 Key design principle: STRIDE should learn future value for many possible
-biological events, not just novelty, next-frame dynamics, or one NaCl benchmark.
+biological events, not just novelty or next-frame dynamics.
 
 ## What Has Been Implemented
 
 Current repository foundation:
 
-- Toy 2D rare-event simulator and weighted-ensemble-like sampling code.
-- GRU trajectory-value baseline.
-- Delayed-label training and replay evaluation for toy systems.
-- Synthetic NaCl reduced-distance benchmark used only as a smoke test.
-- Prototype NaCl training, replay, and WESTPA-style adapter files. These are
-  benchmark scaffolding, not the product target.
+- Structured goal specs for user-conditioned molecular events.
+- Atomistic coordinate-window dataset utilities with atom/residue identity
+  features, masks, proxy labels, and `.npz` save/load.
 - HDF5 inspection/reading scaffolding for WESTPA `west.h5` files.
-- Prototype learned score and quantile bin mappers.
 - Generalized WESTPA segment record loading, lineage reconstruction,
   descendant traversal, delayed pcoord event/flux labels, and pcoord lineage
   window extraction.
@@ -84,15 +80,13 @@ Recent deep learning architecture additions:
 
 - The user goal should start as structured YAML/dict data, not natural language.
   This keeps label generation auditable and training reproducible.
-- STRIDE should be simulation-agnostic. NaCl is useful for fast debugging, but
-  the project goal is broad biological rare-event prediction: binding,
-  unbinding, conformational transitions, contact formation, and target-state
-  membership.
+- STRIDE should be simulation-agnostic. The goal is broad biological rare-event
+  prediction: binding, unbinding, conformational transitions, contact
+  formation, and target-state membership.
 - eGNN learns spatial molecular state for each frame.
 - Temporal Transformer learns time: trajectory direction, commitment, momentum,
   and pre-event history signals across frame embeddings.
-- GRU remains a baseline, but the main STRIDE model should be
-  eGNN + Temporal Transformer + goal conditioning.
+- The main STRIDE model is eGNN + Temporal Transformer + goal conditioning.
 - Delayed descendant labels are the core training signal:
 
 ```text
@@ -148,17 +142,15 @@ WESTPA/data infrastructure exists.
 
 3. Wire extracted delayed-descendant labels into training.
    - Use `StrideValueTargets` and `stride_value_loss`.
-   - Use NaCl only as a smoke test for the full extraction/training path.
-   - Train next on alanine dipeptide or another small geometry benchmark before
+   - Train first on alanine dipeptide or another small geometry benchmark before
      moving to protein/ligand or large conformational systems.
-   - Track top-k enrichment, AUPRC, calibration, and replay utility.
+   - Track top-k enrichment, AUPRC, calibration, and offline scoring utility.
 
 4. Connect model scoring to live WESTPA binning.
    - Use `StrideValueBinMapper` as the WESTPA-facing assignment surface.
    - Add a runtime scorer that computes STRIDE scores from active walker
      histories and exposes them to the mapper.
-   - Include fallback to distance bins or the current GRU mapper if model
-     loading fails.
+   - Include fallback to simple value/distance bins if model loading fails.
 
 5. Add full coordinate data support for the eGNN path.
    - Define atom feature construction.
@@ -179,9 +171,6 @@ WESTPA/data infrastructure exists.
 - Keep generated datasets, checkpoints, WESTPA files, and benchmark outputs out
   of git. Source code and small configs should be tracked; artifacts should be
   regenerated or stored externally.
-- Keep NaCl source code as a benchmark until there are stronger biological
-  examples, but do not let generated NaCl artifacts or naming dominate the
-  project structure.
 - Prefer pure PyTorch for the first eGNN implementation to avoid heavy graph
   library setup.
 - Add focused tests for lineage labels, invariance, shape contracts, and

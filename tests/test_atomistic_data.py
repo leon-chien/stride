@@ -17,7 +17,7 @@ from stride.training import StrideValueTargets, stride_value_loss
 
 
 def test_atom_features_and_selection_masks_include_molecular_identity() -> None:
-    atoms = _toy_atoms()
+    atoms = _example_atoms()
 
     features = compute_atom_features(atoms)
 
@@ -35,9 +35,9 @@ def test_atom_features_and_selection_masks_include_molecular_identity() -> None:
 
 
 def test_build_atomistic_windows_and_proxy_labels(tmp_path) -> None:
-    atoms = _toy_atoms()
-    coordinates = _toy_coordinates()
-    goal = _toy_goal()
+    atoms = _example_atoms()
+    coordinates = _example_coordinates()
+    goal = _example_goal()
 
     dataset = build_atomistic_windows(
         coordinates=coordinates,
@@ -66,11 +66,11 @@ def test_build_atomistic_windows_and_proxy_labels(tmp_path) -> None:
 def test_atomistic_dataset_runs_through_stride_value_model() -> None:
     torch.manual_seed(5)
 
-    atoms = _toy_atoms()
+    atoms = _example_atoms()
     dataset = build_atomistic_windows(
-        coordinates=_toy_coordinates(),
+        coordinates=_example_coordinates(),
         atoms=atoms,
-        goal=_toy_goal(),
+        goal=_example_goal(),
         window_size=3,
         horizon=2,
     )
@@ -109,7 +109,7 @@ def test_atomistic_dataset_runs_through_stride_value_model() -> None:
         assert torch.isfinite(value).all()
 
 
-def _toy_atoms() -> list[AtomRecord]:
+def _example_atoms() -> list[AtomRecord]:
     return [
         AtomRecord(
             atom_name="OD1",
@@ -148,7 +148,7 @@ def _toy_atoms() -> list[AtomRecord]:
     ]
 
 
-def _toy_coordinates() -> np.ndarray:
+def _example_coordinates() -> np.ndarray:
     coordinates = np.zeros((7, 4, 3), dtype=np.float32)
     coordinates[:, 0, :] = np.asarray([0.0, 0.0, 0.0], dtype=np.float32)
     coordinates[:, 1, :] = np.asarray([0.2, 0.0, 0.0], dtype=np.float32)
@@ -161,7 +161,7 @@ def _toy_coordinates() -> np.ndarray:
     return coordinates
 
 
-def _toy_goal() -> GoalSpec:
+def _example_goal() -> GoalSpec:
     return GoalSpec(
         name="ligand_contact_asp42",
         type="contact",

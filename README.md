@@ -14,10 +14,11 @@ In one sentence:
 > into adaptive bins and priorities that WESTPA can use for split/merge
 > resampling.
 
-The project is currently a research prototype. It includes toy weighted-ensemble
-benchmarks, a GRU baseline, a synthetic NaCl association benchmark, WESTPA HDF5
-inspection scaffolding, learned bin mappers, and the first goal-conditioned
-eGNN + Temporal Transformer value model.
+The project is currently a research prototype focused on atomistic,
+goal-conditioned value learning. It includes a structured goal interface,
+atomistic coordinate-window datasets, WESTPA HDF5 lineage extraction, a
+WESTPA-style value bin mapper, and a goal-conditioned eGNN + Temporal
+Transformer value model.
 
 ## Why STRIDE Exists
 
@@ -82,19 +83,20 @@ classifier would miss.
 ### 3. Goal Conditioning
 
 STRIDE uses structured goal specifications. A goal can describe a target such as
-NaCl association, ligand binding, unbinding, RMSD-to-state, or contact
+ligand binding, unbinding, RMSD-to-state, conformational change, or contact
 formation.
 
 Example:
 
 ```yaml
 goal:
-  name: nacl_association
-  type: distance_threshold
-  selection_a: Na+
-  selection_b: Cl-
+  name: ligand_contact_asp42
+  type: contact
+  selections:
+    - ligand
+    - ASP42
   operator: less_than
-  threshold: 0.35
+  threshold: 0.45
   horizon_iterations: 50
   value_target: event_and_flux
 ```
@@ -146,27 +148,27 @@ The current value loss combines:
 
 Implemented:
 
-- 2D rare-event toy simulator.
-- Weighted-ensemble-like split/merge resampling.
-- GRU trajectory-value baseline.
-- Delayed-label training for toy and NaCl-style data.
-- Offline replay evaluation.
-- Synthetic NaCl association benchmark.
-- WESTPA HDF5 inspection and pcoord reading scaffolding.
-- NaCl WESTPA-style adapter and learned score/quantile bin mappers.
 - Goal specification interface.
+- Atomistic dataset schema for coordinate windows, atom/residue features, masks,
+  goal features, and labels.
 - Pure PyTorch eGNN frame encoder.
 - Temporal Transformer value model.
 - Multi-head value loss.
 - STRIDE value-score binning helpers.
+- WESTPA HDF5 lineage reconstruction for segment IDs, parents, weights, and
+  pcoords.
+- Delayed descendant event/flux label extraction from WESTPA lineages.
+- WESTPA-style value bin mapper implementing `assign(coords, mask=None,
+  output=None)`.
 - Tests for goal encoding, eGNN invariance, model heads, value loss, and
   binning.
 
 Not complete yet:
 
-- Full production WESTPA `west.h5` lineage reconstruction.
 - Coordinate trajectory extraction and frame-to-segment mapping for real MD
   systems.
+- Training scripts for atomistic STRIDE datasets.
+- Runtime scorer that computes STRIDE scores for active WESTPA walkers.
 - Live production WESTPA plugin packaging.
 - Large-scale multi-goal training.
 
@@ -174,19 +176,15 @@ Not complete yet:
 
 ```text
 src/stride/goals.py                  Structured goal specifications
+src/stride/data/atomistic.py         Atomistic dataset schema and featurization
 src/stride/models/egnn.py            eGNN molecular frame encoder
 src/stride/models/stride_value_model.py
                                      Goal-conditioned eGNN + Transformer model
-src/stride/models/gru_ranker.py      GRU baseline model
 src/stride/training/stride_value.py  Multi-head delayed-descendant loss
-src/stride/training/train_toy.py     Toy model training
-src/stride/training/train_nacl.py    NaCl benchmark training
 src/stride/binning/                  Score and quantile binning utilities
-src/stride/sampling/                 Weighted-ensemble-like toy sampling
-src/stride/replay/                   Offline replay evaluation
 src/stride/westpa_plugin/            WESTPA adapter and HDF5 bridge scaffolding
-configs/                             Toy and NaCl configs
-scripts/                             Benchmark, training, replay, and demo scripts
+configs/goals/                       Example structured goal specs
+scripts/                             WESTPA extraction and inspection scripts
 tests/                               Focused unit tests
 ```
 
@@ -216,10 +214,10 @@ Run the deep model tests:
 pytest tests/test_deep_value_model.py
 ```
 
-Run the toy tests:
+Run atomistic data tests:
 
 ```bash
-pytest tests/test_toy2d.py
+pytest tests/test_atomistic_data.py
 ```
 
 If working from another active shell environment, run through the `stride` conda
@@ -240,28 +238,22 @@ does not indicate a correctness failure.
 
 ## Example Workflows
 
-Generate the synthetic NaCl dataset:
-
-```bash
-python scripts/run_nacl_dataset.py
-```
-
-Train the NaCl GRU baseline:
-
-```bash
-python scripts/train_nacl.py
-```
-
 Inspect a WESTPA HDF5 file:
 
 ```bash
 python scripts/inspect_westpa_h5.py path/to/west.h5
 ```
 
-Run the learned-bin mapper demo:
+Extract pcoord lineage windows and delayed labels from a WESTPA file:
 
 ```bash
-python scripts/demo_stride_binmapper.py
+python scripts/extract_westpa_dataset.py path/to/west.h5 configs/goals/ligand_contact_asp42.yaml outputs/stride_dataset.npz
+```
+
+Use the atomistic dataset utilities from Python:
+
+```python
+from stride.data import AtomRecord, build_atomistic_windows
 ```
 
 ## Roadmap
