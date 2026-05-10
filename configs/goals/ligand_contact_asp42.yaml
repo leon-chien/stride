@@ -1,0 +1,10 @@
+goal:
+  name: ligand_contact_asp42
+  type: contact
+  selections:
+    - ligand
+    - ASP42
+  operator: less_than
+  threshold: 0.45
+  horizon_iterations: 50
+  value_target: event_and_flux

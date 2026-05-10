@@ -44,6 +44,11 @@ Current repository foundation:
   structured goal YAML into a STRIDE `.npz` training artifact.
 - A WESTPA-style `StrideValueBinMapper` that implements `assign(coords,
   mask=None, output=None)` for scalar STRIDE value scores.
+- Canonical atomistic STRIDE dataset utilities in `src/stride/data/atomistic.py`
+  for coordinate windows, atom/residue features, atom masks, frame masks, goal
+  features, proxy event labels, and `.npz` save/load.
+- Atomistic tests that pass a small protein-ligand contact dataset through the
+  existing eGNN + Temporal Transformer value model.
 
 Recent deep learning architecture additions:
 
@@ -132,27 +137,36 @@ WESTPA/data infrastructure exists.
    - Add optional coordinate/topology references and frame-to-segment mapping.
    - Preserve `window_mask` support for variable-length trajectory histories.
 
-2. Wire extracted delayed-descendant labels into training.
+2. Add public-MD and local-trajectory converters into the atomistic dataset
+   contract.
+   - Target the existing `AtomisticDataset` schema instead of creating new
+     training formats.
+   - Add MDAnalysis/OpenMM converters only after the pure NumPy schema remains
+     stable.
+   - Public MD proxy labels can train event prediction, but true flux labels
+     still require WESTPA weights and descendants.
+
+3. Wire extracted delayed-descendant labels into training.
    - Use `StrideValueTargets` and `stride_value_loss`.
    - Use NaCl only as a smoke test for the full extraction/training path.
    - Train next on alanine dipeptide or another small geometry benchmark before
      moving to protein/ligand or large conformational systems.
    - Track top-k enrichment, AUPRC, calibration, and replay utility.
 
-3. Connect model scoring to live WESTPA binning.
+4. Connect model scoring to live WESTPA binning.
    - Use `StrideValueBinMapper` as the WESTPA-facing assignment surface.
    - Add a runtime scorer that computes STRIDE scores from active walker
      histories and exposes them to the mapper.
    - Include fallback to distance bins or the current GRU mapper if model
      loading fails.
 
-4. Add coordinate data support for the eGNN path.
+5. Add full coordinate data support for the eGNN path.
    - Define atom feature construction.
    - Use alanine dipeptide as the first serious geometry benchmark.
    - Then add a biological benchmark such as ligand binding/unbinding or a
      protein conformational transition.
 
-5. Benchmark distance bins vs STRIDE bins.
+6. Benchmark distance bins vs STRIDE bins.
    - Compare time to first event, target flux estimate, effective sample size,
      lineage diversity, probability conservation, and bin occupancy stability.
 
