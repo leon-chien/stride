@@ -3,3 +3,5 @@ pyyaml
 matplotlib
 scikit-learn
 torch
+h5py
+pytest

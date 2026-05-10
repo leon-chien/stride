@@ -221,3 +221,6 @@ checkpoints/
 outputs/
 *.pt
 *.npz
+
+AGENTS.md
+.DS_Store
