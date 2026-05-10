@@ -37,6 +37,13 @@ Current repository foundation:
   benchmark scaffolding, not the product target.
 - HDF5 inspection/reading scaffolding for WESTPA `west.h5` files.
 - Prototype learned score and quantile bin mappers.
+- Generalized WESTPA segment record loading, lineage reconstruction,
+  descendant traversal, delayed pcoord event/flux labels, and pcoord lineage
+  window extraction.
+- A `scripts/extract_westpa_dataset.py` CLI that turns a `west.h5` file and a
+  structured goal YAML into a STRIDE `.npz` training artifact.
+- A WESTPA-style `StrideValueBinMapper` that implements `assign(coords,
+  mask=None, output=None)` for scalar STRIDE value scores.
 
 Recent deep learning architecture additions:
 
@@ -120,40 +127,32 @@ Prioritize the one-person build path. Do not jump straight to a large
 foundation model, and do not do more serious training until generalized
 WESTPA/data infrastructure exists.
 
-1. Finish generalized WESTPA lineage reconstruction.
-   - Extend `src/stride/westpa_plugin/h5_reader.py`.
-   - Read iteration groups, segment indices, parent IDs, pcoords, and weights.
-   - Reconstruct walker ancestry and descendant trees.
-   - Add tiny hand-built lineage tests where event and flux labels are known.
+1. Expand the WESTPA dataset bridge from pcoord-only to coordinate-aware data.
+   - Keep the existing pcoord lineage extractor as the smoke-test path.
+   - Add optional coordinate/topology references and frame-to-segment mapping.
+   - Preserve `window_mask` support for variable-length trajectory histories.
 
-2. Build a simulation-agnostic STRIDE dataset extractor.
-   - Input: `west.h5`, goal spec, optional coordinate/topology references.
-   - Output: windows, labels, weights, lineage IDs, goal features, metadata.
-   - Start with pcoord/reduced-feature windows before requiring coordinates, but
-     design the artifact schema so eGNN coordinate windows can be added without
-     changing the training API.
-
-3. Wire delayed-descendant labels into training.
+2. Wire extracted delayed-descendant labels into training.
    - Use `StrideValueTargets` and `stride_value_loss`.
    - Use NaCl only as a smoke test for the full extraction/training path.
    - Train next on alanine dipeptide or another small geometry benchmark before
      moving to protein/ligand or large conformational systems.
    - Track top-k enrichment, AUPRC, calibration, and replay utility.
 
-4. Add a WESTPA-facing scorer/binning adapter for the new value model.
-   - Input: active walker histories and goal spec.
-   - Output: bin IDs, value heads, combined score, diagnostics.
-   - Include fallback to distance bins or current GRU mapper if model loading
-     fails.
+3. Connect model scoring to live WESTPA binning.
+   - Use `StrideValueBinMapper` as the WESTPA-facing assignment surface.
+   - Add a runtime scorer that computes STRIDE scores from active walker
+     histories and exposes them to the mapper.
+   - Include fallback to distance bins or the current GRU mapper if model
+     loading fails.
 
-5. Add coordinate data support for the eGNN path.
-   - Define frame-to-segment coordinate mapping.
-   - Add atom feature construction.
+4. Add coordinate data support for the eGNN path.
+   - Define atom feature construction.
    - Use alanine dipeptide as the first serious geometry benchmark.
    - Then add a biological benchmark such as ligand binding/unbinding or a
      protein conformational transition.
 
-6. Benchmark distance bins vs STRIDE bins.
+5. Benchmark distance bins vs STRIDE bins.
    - Compare time to first event, target flux estimate, effective sample size,
      lineage diversity, probability conservation, and bin occupancy stability.
 

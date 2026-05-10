@@ -6,6 +6,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from stride.goals import GoalSpec
+
 
 @dataclass
 class H5DatasetInfo:
@@ -16,6 +18,69 @@ class H5DatasetInfo:
     path: str
     shape: tuple[int, ...]
     dtype: str
+
+
+@dataclass(frozen=True)
+class SegmentKey:
+    """
+    Stable identity for one WESTPA segment.
+    """
+
+    n_iter: int
+    seg_id: int
+
+
+@dataclass
+class SegmentRecord:
+    """
+    WESTPA segment metadata needed for lineage reconstruction and labeling.
+    """
+
+    key: SegmentKey
+    parent_id: int
+    weight: float
+    endpoint_type: int | None
+    pcoord: np.ndarray
+
+    @property
+    def parent_key(self) -> SegmentKey | None:
+        """
+        Parent segment key, or None for initial-state parents.
+
+        WESTPA stores initial-state parents as negative IDs. Nonnegative parent
+        IDs refer to segment IDs in the previous iteration.
+        """
+        if self.parent_id < 0 or self.key.n_iter <= 1:
+            return None
+        return SegmentKey(
+            n_iter=self.key.n_iter - 1,
+            seg_id=int(self.parent_id),
+        )
+
+
+@dataclass(frozen=True)
+class DelayedLabel:
+    """
+    Delayed descendant label for one segment.
+    """
+
+    event: int
+    flux: float
+    num_event_descendants: int
+
+
+@dataclass(frozen=True)
+class LineageWindow:
+    """
+    Training window extracted from a WESTPA lineage.
+    """
+
+    key: SegmentKey
+    pcoord_window: np.ndarray
+    event: int
+    flux: float
+    weight: float
+    goal_features: np.ndarray
 
 
 def list_h5_datasets(h5_path: str | Path) -> list[H5DatasetInfo]:
@@ -130,9 +195,26 @@ def list_iteration_groups(h5_path: str | Path) -> list[str]:
 
         iteration_group = h5["/iterations"]
 
-        names = sorted(iteration_group.keys())
+        names = sorted(
+            iteration_group.keys(),
+            key=_iteration_name_to_number,
+        )
 
     return [f"/iterations/{name}" for name in names]
+
+
+def _iteration_name_to_number(name: str) -> int:
+    try:
+        return int(name.rsplit("_", maxsplit=1)[-1])
+    except ValueError:
+        return -1
+
+
+def iteration_group_to_number(iteration_group_path: str) -> int:
+    """
+    Convert '/iterations/iter_00000012' to 12.
+    """
+    return _iteration_name_to_number(Path(iteration_group_path).name)
 
 
 def read_iteration_pcoord(
@@ -152,6 +234,342 @@ def read_iteration_pcoord(
     dataset_path = f"{iteration_group_path}/pcoord"
 
     return read_dataset(h5_path, dataset_path)
+
+
+def read_iteration_seg_index(
+    h5_path: str | Path,
+    iteration_group_path: str,
+) -> np.ndarray:
+    """
+    Read WESTPA seg_index from one iteration group.
+
+    Expected path:
+        /iterations/iter_xxxxxxxx/seg_index
+    """
+    dataset_path = f"{iteration_group_path}/seg_index"
+    return read_dataset(h5_path, dataset_path)
+
+
+def read_iteration_records(
+    h5_path: str | Path,
+    iteration_group_path: str,
+) -> list[SegmentRecord]:
+    """
+    Read one iteration as SegmentRecord objects.
+    """
+    n_iter = iteration_group_to_number(iteration_group_path)
+    if n_iter < 0:
+        raise ValueError(f"Could not parse iteration number from {iteration_group_path}")
+
+    pcoord = read_iteration_pcoord(h5_path, iteration_group_path)
+    seg_index = read_iteration_seg_index(h5_path, iteration_group_path)
+
+    if len(pcoord) != len(seg_index):
+        raise ValueError(
+            f"pcoord and seg_index length mismatch for {iteration_group_path}: "
+            f"{len(pcoord)} != {len(seg_index)}"
+        )
+
+    dtype_names = set(seg_index.dtype.names or ())
+    if "parent_id" not in dtype_names:
+        raise KeyError(f"{iteration_group_path}/seg_index has no parent_id field")
+    if "weight" not in dtype_names:
+        raise KeyError(f"{iteration_group_path}/seg_index has no weight field")
+
+    records: list[SegmentRecord] = []
+    for seg_id, row in enumerate(seg_index):
+        endpoint_type = None
+        if "endpoint_type" in dtype_names:
+            endpoint_type = int(row["endpoint_type"])
+
+        records.append(
+            SegmentRecord(
+                key=SegmentKey(n_iter=n_iter, seg_id=int(seg_id)),
+                parent_id=int(row["parent_id"]),
+                weight=float(row["weight"]),
+                endpoint_type=endpoint_type,
+                pcoord=np.asarray(pcoord[seg_id]),
+            )
+        )
+
+    return records
+
+
+def load_segment_records(
+    h5_path: str | Path,
+    max_iterations: int | None = None,
+) -> dict[SegmentKey, SegmentRecord]:
+    """
+    Load all available WESTPA segment records keyed by (iteration, segment ID).
+    """
+    iteration_groups = list_iteration_groups(h5_path)
+    if max_iterations is not None:
+        iteration_groups = iteration_groups[-max_iterations:]
+
+    records: dict[SegmentKey, SegmentRecord] = {}
+    for group_path in iteration_groups:
+        for record in read_iteration_records(h5_path, group_path):
+            records[record.key] = record
+    return records
+
+
+def build_child_index(
+    records: dict[SegmentKey, SegmentRecord],
+) -> dict[SegmentKey, list[SegmentKey]]:
+    """
+    Build parent -> children mapping for descendant traversal.
+    """
+    child_index: dict[SegmentKey, list[SegmentKey]] = {}
+    for record in records.values():
+        parent_key = record.parent_key
+        if parent_key is None:
+            continue
+        if parent_key not in records:
+            continue
+        child_index.setdefault(parent_key, []).append(record.key)
+
+    for children in child_index.values():
+        children.sort(key=lambda key: (key.n_iter, key.seg_id))
+
+    return child_index
+
+
+def trace_ancestor_keys(
+    records: dict[SegmentKey, SegmentRecord],
+    key: SegmentKey,
+    window_iterations: int,
+) -> list[SegmentKey]:
+    """
+    Return ancestor keys ordered oldest -> current for one segment.
+    """
+    if window_iterations <= 0:
+        raise ValueError("window_iterations must be positive.")
+    if key not in records:
+        raise KeyError(f"Segment not found: {key}")
+
+    lineage = [key]
+    current = records[key]
+
+    while len(lineage) < window_iterations:
+        parent_key = current.parent_key
+        if parent_key is None or parent_key not in records:
+            break
+        lineage.append(parent_key)
+        current = records[parent_key]
+
+    lineage.reverse()
+    return lineage
+
+
+def extract_pcoord_window(
+    records: dict[SegmentKey, SegmentRecord],
+    key: SegmentKey,
+    window_iterations: int,
+    pcoord_frame_index: int = -1,
+) -> np.ndarray:
+    """
+    Extract pcoord history for one segment lineage.
+
+    The returned array is ordered oldest -> current and shaped
+    [available_window, pcoord_dim]. The window may be shorter near the beginning
+    of a simulation.
+    """
+    lineage = trace_ancestor_keys(
+        records=records,
+        key=key,
+        window_iterations=window_iterations,
+    )
+    values = [records[lineage_key].pcoord[pcoord_frame_index] for lineage_key in lineage]
+    return np.asarray(values, dtype=np.float32)
+
+
+def descendant_keys_within_horizon(
+    child_index: dict[SegmentKey, list[SegmentKey]],
+    key: SegmentKey,
+    horizon_iterations: int,
+) -> list[SegmentKey]:
+    """
+    Return descendant keys within a future iteration horizon.
+    """
+    if horizon_iterations <= 0:
+        raise ValueError("horizon_iterations must be positive.")
+
+    descendants: list[SegmentKey] = []
+    queue = list(child_index.get(key, []))
+    max_iter = key.n_iter + horizon_iterations
+
+    while queue:
+        child = queue.pop(0)
+        if child.n_iter > max_iter:
+            continue
+        descendants.append(child)
+        queue.extend(child_index.get(child, []))
+
+    descendants.sort(key=lambda item: (item.n_iter, item.seg_id))
+    return descendants
+
+
+def pcoord_satisfies_goal(
+    pcoord: np.ndarray,
+    goal: GoalSpec,
+    pcoord_dim: int = 0,
+) -> bool:
+    """
+    Evaluate a structured goal against a pcoord value.
+
+    This supports pcoord-based labels. Coordinate/RMSD/contact goals should be
+    evaluated by a separate coordinate-aware labeler once coordinate extraction
+    is available.
+    """
+    goal.validate()
+
+    if goal.type != "distance_threshold":
+        raise NotImplementedError(
+            "Only pcoord distance_threshold goals are supported by h5_reader. "
+            "Coordinate-aware goals should use a coordinate labeler."
+        )
+
+    value = float(np.asarray(pcoord)[pcoord_dim])
+    if goal.operator == "less_than":
+        return value < goal.threshold
+    if goal.operator == "greater_than":
+        return value > goal.threshold
+    raise NotImplementedError(
+        f"Operator {goal.operator!r} is not supported for scalar pcoord labels."
+    )
+
+
+def compute_delayed_labels(
+    records: dict[SegmentKey, SegmentRecord],
+    goal: GoalSpec,
+    horizon_iterations: int | None = None,
+    pcoord_frame_index: int = -1,
+    pcoord_dim: int = 0,
+    include_self: bool = False,
+) -> dict[SegmentKey, DelayedLabel]:
+    """
+    Compute event/flux labels from future descendants.
+
+    Event is 1 if any descendant reaches the target within the horizon. Flux is
+    the sum of descendant segment weights that satisfy the target condition.
+    """
+    horizon = horizon_iterations or goal.horizon_iterations
+    child_index = build_child_index(records)
+
+    labels: dict[SegmentKey, DelayedLabel] = {}
+    for key, record in records.items():
+        candidates = descendant_keys_within_horizon(child_index, key, horizon)
+        if include_self:
+            candidates = [key] + candidates
+
+        flux = 0.0
+        num_event_descendants = 0
+        for descendant_key in candidates:
+            descendant = records[descendant_key]
+            pcoord = descendant.pcoord[pcoord_frame_index]
+            if pcoord_satisfies_goal(pcoord, goal=goal, pcoord_dim=pcoord_dim):
+                num_event_descendants += 1
+                flux += float(descendant.weight)
+
+        labels[key] = DelayedLabel(
+            event=int(num_event_descendants > 0),
+            flux=float(flux),
+            num_event_descendants=num_event_descendants,
+        )
+
+    return labels
+
+
+def build_lineage_windows(
+    records: dict[SegmentKey, SegmentRecord],
+    goal: GoalSpec,
+    window_iterations: int,
+    horizon_iterations: int | None = None,
+    pcoord_frame_index: int = -1,
+    pcoord_dim: int = 0,
+    require_full_window: bool = True,
+    include_self_in_label: bool = False,
+) -> list[LineageWindow]:
+    """
+    Build pcoord lineage windows and delayed labels for training.
+    """
+    labels = compute_delayed_labels(
+        records=records,
+        goal=goal,
+        horizon_iterations=horizon_iterations,
+        pcoord_frame_index=pcoord_frame_index,
+        pcoord_dim=pcoord_dim,
+        include_self=include_self_in_label,
+    )
+
+    windows: list[LineageWindow] = []
+    goal_features = goal.to_feature_vector()
+
+    for key in sorted(records, key=lambda item: (item.n_iter, item.seg_id)):
+        pcoord_window = extract_pcoord_window(
+            records=records,
+            key=key,
+            window_iterations=window_iterations,
+            pcoord_frame_index=pcoord_frame_index,
+        )
+        if require_full_window and len(pcoord_window) < window_iterations:
+            continue
+
+        label = labels[key]
+        windows.append(
+            LineageWindow(
+                key=key,
+                pcoord_window=pcoord_window,
+                event=label.event,
+                flux=label.flux,
+                weight=records[key].weight,
+                goal_features=goal_features,
+            )
+        )
+
+    return windows
+
+
+def save_lineage_windows_npz(
+    output_path: str | Path,
+    windows: list[LineageWindow],
+) -> None:
+    """
+    Save pcoord lineage windows as a compact training artifact.
+    """
+    if not windows:
+        raise ValueError("No lineage windows to save.")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    pcoord_dims = {window.pcoord_window.shape[1:] for window in windows}
+    if len(pcoord_dims) != 1:
+        raise ValueError("All pcoord windows must have the same non-time dimensions.")
+
+    max_window = max(window.pcoord_window.shape[0] for window in windows)
+    pcoord_dim = next(iter(pcoord_dims))
+    padded_windows = np.zeros((len(windows), max_window, *pcoord_dim), dtype=np.float32)
+    window_mask = np.zeros((len(windows), max_window), dtype=bool)
+
+    for i, window in enumerate(windows):
+        length = window.pcoord_window.shape[0]
+        padded_windows[i, -length:] = window.pcoord_window
+        window_mask[i, -length:] = True
+
+    np.savez_compressed(
+        output_path,
+        pcoord_windows=padded_windows,
+        window_mask=window_mask,
+        event_labels=np.asarray([window.event for window in windows], dtype=np.float32),
+        flux_labels=np.asarray([window.flux for window in windows], dtype=np.float32),
+        weights=np.asarray([window.weight for window in windows], dtype=np.float64),
+        n_iter=np.asarray([window.key.n_iter for window in windows], dtype=np.int64),
+        seg_id=np.asarray([window.key.seg_id for window in windows], dtype=np.int64),
+        goal_features=np.stack([window.goal_features for window in windows]).astype(
+            np.float32
+        ),
+    )
 
 
 def extract_latest_pcoord_histories(
