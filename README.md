@@ -158,17 +158,20 @@ Implemented:
 - WESTPA HDF5 lineage reconstruction for segment IDs, parents, weights, and
   pcoords.
 - Delayed descendant event/flux label extraction from WESTPA lineages.
+- Multi-model PDB to atomistic STRIDE dataset conversion.
+- A generated protein-ligand contact smoke-test dataset.
+- Atomistic model training, checkpointing, and offline scoring scripts.
 - WESTPA-style value bin mapper implementing `assign(coords, mask=None,
   output=None)`.
 - Tests for goal encoding, eGNN invariance, model heads, value loss, and
-  binning.
+  binning, PDB conversion, and atomistic training.
 
 Not complete yet:
 
-- Coordinate trajectory extraction and frame-to-segment mapping for real MD
-  systems.
-- Training scripts for atomistic STRIDE datasets.
-- Runtime scorer that computes STRIDE scores for active WESTPA walkers.
+- High-throughput trajectory conversion for DCD/XTC/NetCDF formats.
+- Frame-to-segment mapping between real WESTPA walkers and coordinate files.
+- Runtime scorer that computes STRIDE scores for active WESTPA walkers inside a
+  live WESTPA run.
 - Live production WESTPA plugin packaging.
 - Large-scale multi-goal training.
 
@@ -177,14 +180,17 @@ Not complete yet:
 ```text
 src/stride/goals.py                  Structured goal specifications
 src/stride/data/atomistic.py         Atomistic dataset schema and featurization
+src/stride/data/pdb_converter.py     Multi-model PDB trajectory converter
+src/stride/data/sample.py            Tiny generated atomistic smoke-test dataset
 src/stride/models/egnn.py            eGNN molecular frame encoder
 src/stride/models/stride_value_model.py
                                      Goal-conditioned eGNN + Transformer model
+src/stride/training/atomistic.py     Train/checkpoint/score atomistic models
 src/stride/training/stride_value.py  Multi-head delayed-descendant loss
 src/stride/binning/                  Score and quantile binning utilities
 src/stride/westpa_plugin/            WESTPA adapter and HDF5 bridge scaffolding
 configs/goals/                       Example structured goal specs
-scripts/                             WESTPA extraction and inspection scripts
+scripts/                             Dataset, training, scoring, and WESTPA CLIs
 tests/                               Focused unit tests
 ```
 
@@ -208,33 +214,65 @@ scikit-learn, h5py, PyYAML, and Matplotlib.
 
 ## Testing
 
-Run the deep model tests:
+Run the full suite:
 
 ```bash
-pytest tests/test_deep_value_model.py
-```
-
-Run atomistic data tests:
-
-```bash
-pytest tests/test_atomistic_data.py
+pytest tests
 ```
 
 If working from another active shell environment, run through the `stride` conda
 environment:
 
 ```bash
-conda run -n stride pytest tests/test_deep_value_model.py
+conda run -n stride pytest tests
 ```
 
-Expected current result for the deep model tests:
+Expected current result:
 
 ```text
-4 passed
+15 passed
 ```
 
 PyTorch may emit a Transformer nested-tensor performance warning. That warning
 does not indicate a correctness failure.
+
+## Small Dataset
+
+Create the local smoke-test dataset:
+
+```bash
+python scripts/create_sample_dataset.py
+```
+
+This writes ignored local artifacts:
+
+```text
+outputs/sample_ligand_contact.npz
+outputs/sample_ligand_contact.pdb
+```
+
+The dataset is intentionally tiny and synthetic. It proves that coordinates,
+atom/residue identity features, structured goals, delayed proxy labels, the eGNN
+encoder, the Temporal Transformer, and checkpoint scoring all connect. It is not
+the final biological training corpus.
+
+Convert a multi-model PDB into the same dataset format:
+
+```bash
+python scripts/build_atomistic_dataset.py outputs/sample_ligand_contact.pdb configs/goals/ligand_contact_asp42.yaml outputs/sample_from_pdb.npz --window-size 4 --horizon 2
+```
+
+Train a small checkpoint:
+
+```bash
+python scripts/train_atomistic.py outputs/sample_ligand_contact.npz outputs/sample_ligand_contact.pt --epochs 1 --hidden-dim 16 --egnn-layers 1 --transformer-layers 1 --transformer-heads 4 --dropout 0.0
+```
+
+Score the dataset with that checkpoint:
+
+```bash
+python scripts/score_atomistic.py outputs/sample_ligand_contact.npz outputs/sample_ligand_contact.pt outputs/sample_ligand_contact_scores.npz
+```
 
 ## Example Workflows
 
@@ -253,7 +291,16 @@ python scripts/extract_westpa_dataset.py path/to/west.h5 configs/goals/ligand_co
 Use the atomistic dataset utilities from Python:
 
 ```python
-from stride.data import AtomRecord, build_atomistic_windows
+from stride.data import build_atomistic_dataset_from_pdb
+from stride.goals import GoalSpec
+
+goal = GoalSpec.from_yaml("configs/goals/ligand_contact_asp42.yaml")
+dataset = build_atomistic_dataset_from_pdb(
+    "outputs/sample_ligand_contact.pdb",
+    goal=goal,
+    window_size=4,
+    horizon=2,
+)
 ```
 
 ## Roadmap
@@ -263,6 +310,7 @@ from stride.data import AtomRecord, build_atomistic_windows
 - Reconstruct walker lineages from `west.h5`.
 - Extract delayed descendant event and flux labels.
 - Build a canonical STRIDE dataset format from WESTPA runs.
+- Map WESTPA segments to coordinate trajectories for eGNN inputs.
 
 ### Phase 2: Live STRIDE Binning
 

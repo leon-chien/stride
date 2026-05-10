@@ -43,8 +43,26 @@ Current repository foundation:
 - Canonical atomistic STRIDE dataset utilities in `src/stride/data/atomistic.py`
   for coordinate windows, atom/residue features, atom masks, frame masks, goal
   features, proxy event labels, and `.npz` save/load.
+- `src/stride/data/pdb_converter.py`
+  - Loads single-model or multi-model PDB files into STRIDE coordinates and
+    `AtomRecord` metadata.
+  - Converts those trajectories into the canonical `AtomisticDataset` schema.
+- `src/stride/data/sample.py`
+  - Generates a tiny ASP42/ligand contact trajectory for local smoke tests.
+  - Writes both `.npz` datasets and multi-model PDB files.
+- `src/stride/training/atomistic.py`
+  - Trains the eGNN + Temporal Transformer on `AtomisticDataset`.
+  - Saves/loads PyTorch checkpoints.
+  - Scores datasets offline with `p_event`, `flux_value`, `uncertainty`, and
+    `stride_score`.
+- CLI scripts:
+  - `scripts/create_sample_dataset.py`
+  - `scripts/build_atomistic_dataset.py`
+  - `scripts/train_atomistic.py`
+  - `scripts/score_atomistic.py`
 - Atomistic tests that pass a small protein-ligand contact dataset through the
   existing eGNN + Temporal Transformer value model.
+- PDB conversion and atomistic checkpoint tests.
 
 Recent deep learning architecture additions:
 
@@ -101,24 +119,39 @@ recent lineage window at iteration t
 ## Environment Notes
 
 - The active base Python in this shell may not have project dependencies.
-- The `stride` conda environment has NumPy and Torch available:
+- The `stride` conda environment has the current test dependencies available:
 
 ```bash
 conda run -n stride python ...
 ```
 
-- `pytest` was not installed in the checked environment when the deep-learning
-  modules were added. Direct function-level validation was run with:
-
-```bash
-conda run -n stride python -c "import sys; sys.path.insert(0, 'tests'); import test_deep_value_model as t; t.test_goal_spec_feature_vector_is_deterministic(); t.test_egnn_frame_embedding_is_translation_and_rotation_invariant(); t.test_stride_value_model_outputs_westpa_scoring_heads(); t.test_stride_value_loss_and_quantile_binning_interfaces(); print('deep value tests passed')"
-```
-
 Compilation was checked with:
 
 ```bash
-conda run -n stride python -m compileall src tests
+conda run -n stride python -m compileall src scripts tests
 ```
+
+Current full test command:
+
+```bash
+conda run -n stride pytest tests
+```
+
+Current expected result:
+
+```text
+15 passed
+```
+
+Local smoke-test artifacts can be regenerated with:
+
+```bash
+conda run -n stride python scripts/create_sample_dataset.py
+conda run -n stride python scripts/train_atomistic.py outputs/sample_ligand_contact.npz outputs/sample_ligand_contact.pt --epochs 1 --hidden-dim 16 --egnn-layers 1 --transformer-layers 1 --transformer-heads 4 --dropout 0.0
+conda run -n stride python scripts/score_atomistic.py outputs/sample_ligand_contact.npz outputs/sample_ligand_contact.pt outputs/sample_ligand_contact_scores.npz
+```
+
+Generated files under `outputs/` are ignored and should not be committed.
 
 ## Next Goals
 
@@ -131,19 +164,16 @@ WESTPA/data infrastructure exists.
    - Add optional coordinate/topology references and frame-to-segment mapping.
    - Preserve `window_mask` support for variable-length trajectory histories.
 
-2. Add public-MD and local-trajectory converters into the atomistic dataset
-   contract.
-   - Target the existing `AtomisticDataset` schema instead of creating new
-     training formats.
-   - Add MDAnalysis/OpenMM converters only after the pure NumPy schema remains
-     stable.
+2. Add higher-throughput public-MD and local-trajectory converters.
+   - The PDB converter is now the lightweight proof of the adapter contract.
+   - Next likely converter is MDAnalysis for topology + DCD/XTC/NetCDF.
    - Public MD proxy labels can train event prediction, but true flux labels
      still require WESTPA weights and descendants.
 
-3. Wire extracted delayed-descendant labels into training.
-   - Use `StrideValueTargets` and `stride_value_loss`.
-   - Train first on alanine dipeptide or another small geometry benchmark before
-     moving to protein/ligand or large conformational systems.
+3. Train on a real small biological or biophysical trajectory.
+   - Use the new training script first to validate the checkpoint workflow.
+   - Good first serious target: alanine dipeptide transition or a small
+     protein-ligand/contact trajectory with known event labels.
    - Track top-k enrichment, AUPRC, calibration, and offline scoring utility.
 
 4. Connect model scoring to live WESTPA binning.
