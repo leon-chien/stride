@@ -9,6 +9,7 @@ from torch import nn
 @dataclass(frozen=True)
 class StrideValueLossConfig:
     event_weight: float = 1.0
+    event_positive_weight: float = 1.0
     flux_weight: float = 1.0
     uncertainty_weight: float = 0.01
     score_weight: float = 0.0
@@ -46,9 +47,17 @@ def stride_value_loss(
     event_target = targets.event.to(dtype=event_pred.dtype, device=event_pred.device)
     flux_target = targets.flux.to(dtype=flux_pred.dtype, device=flux_pred.device)
 
+    event_sample_weight = torch.ones_like(event_target)
+    event_sample_weight = torch.where(
+        event_target >= 0.5,
+        event_sample_weight * float(config.event_positive_weight),
+        event_sample_weight,
+    )
+
     event_loss = nn.functional.binary_cross_entropy(
         event_pred.clamp(min=1e-6, max=1.0 - 1e-6),
         event_target,
+        weight=event_sample_weight,
     )
     flux_loss = nn.functional.mse_loss(flux_pred, flux_target)
     uncertainty_loss = uncertainty.mean()
@@ -69,6 +78,7 @@ def stride_value_loss(
     metrics = {
         "loss": float(total.detach().cpu()),
         "event_loss": float(event_loss.detach().cpu()),
+        "event_positive_weight": float(config.event_positive_weight),
         "flux_loss": float(flux_loss.detach().cpu()),
         "uncertainty_loss": float(uncertainty_loss.detach().cpu()),
         "score_loss": float(score_loss.detach().cpu()),

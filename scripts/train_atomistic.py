@@ -34,6 +34,11 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--radius", type=float, default=None)
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--event-positive-weight",
+        default="auto",
+        help="Positive event class weight. Use 'auto' for negative/positive ratio.",
+    )
     args = parser.parse_args()
 
     dataset, config = load_dataset_and_make_config(
@@ -55,6 +60,7 @@ def main() -> None:
         seed=args.seed,
         device=args.device,
         split_strategy=args.split_strategy,
+        event_positive_weight=_parse_event_positive_weight(args.event_positive_weight),
     )
     save_atomistic_checkpoint(
         args.checkpoint,
@@ -69,6 +75,7 @@ def main() -> None:
             "split_strategy": args.split_strategy,
             "seed": args.seed,
             "device": args.device,
+            "event_positive_weight": args.event_positive_weight,
         },
     )
 
@@ -76,6 +83,11 @@ def main() -> None:
     print(f"Checkpoint: {args.checkpoint}")
     for key in sorted(metrics):
         print(f"{key}: {metrics[key]:.6g}")
+
+def _parse_event_positive_weight(value: str) -> float | str:
+    if value == "auto":
+        return value
+    return float(value)
 
 
 if __name__ == "__main__":

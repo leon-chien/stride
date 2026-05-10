@@ -10,7 +10,11 @@ from torch.utils.data import DataLoader, TensorDataset
 from stride.data import AtomisticDataset, load_atomistic_dataset_npz
 from stride.models import StrideModelConfig, StrideValueModel
 from stride.training.metrics import compute_binary_metrics, top_k_enrichment
-from stride.training.stride_value import StrideValueTargets, stride_value_loss
+from stride.training.stride_value import (
+    StrideValueLossConfig,
+    StrideValueTargets,
+    stride_value_loss,
+)
 
 
 def train_atomistic_value_model(
@@ -23,6 +27,7 @@ def train_atomistic_value_model(
     seed: int = 7,
     device: str | None = None,
     split_strategy: str = "contiguous",
+    event_positive_weight: float | str = "auto",
 ) -> tuple[StrideValueModel, dict[str, float]]:
     """
     Train STRIDE's goal-conditioned value model on an AtomisticDataset.
@@ -45,6 +50,12 @@ def train_atomistic_value_model(
 
     model = StrideValueModel(config).to(device_obj)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    loss_config = StrideValueLossConfig(
+        event_positive_weight=_resolve_event_positive_weight(
+            dataset.event_labels,
+            event_positive_weight,
+        )
+    )
     metrics: dict[str, float] = {}
 
     for epoch in range(1, epochs + 1):
@@ -66,6 +77,7 @@ def train_atomistic_value_model(
             loss, loss_metrics = stride_value_loss(
                 outputs,
                 StrideValueTargets(event=event, flux=flux),
+                config=loss_config,
             )
             loss.backward()
             optimizer.step()
@@ -73,7 +85,16 @@ def train_atomistic_value_model(
 
         metrics = {"epoch": float(epoch), "train_loss": float(np.mean(epoch_losses))}
         if val_tensors is not None:
-            metrics.update(_evaluate_model(model, val_tensors, device_obj, prefix="val_"))
+            metrics.update(
+                _evaluate_model(
+                    model,
+                    val_tensors,
+                    device_obj,
+                    prefix="val_",
+                    loss_config=loss_config,
+                )
+            )
+        metrics["event_positive_weight"] = float(loss_config.event_positive_weight)
 
     return model, metrics
 
@@ -170,6 +191,25 @@ def resolve_device(device: str | None = None) -> torch.device:
     return torch.device(value)
 
 
+def _resolve_event_positive_weight(
+    event_labels: np.ndarray,
+    event_positive_weight: float | str,
+) -> float:
+    if isinstance(event_positive_weight, str):
+        if event_positive_weight != "auto":
+            raise ValueError("event_positive_weight must be a float or 'auto'.")
+        positive = float(np.sum(event_labels >= 0.5))
+        negative = float(np.sum(event_labels < 0.5))
+        if positive == 0.0:
+            return 1.0
+        return max(1.0, negative / positive)
+
+    value = float(event_positive_weight)
+    if value <= 0.0:
+        raise ValueError("event_positive_weight must be positive.")
+    return value
+
+
 def load_dataset_and_make_config(
     dataset_path: str | Path,
     hidden_dim: int = 128,
@@ -248,6 +288,7 @@ def _evaluate_model(
     tensors: tuple[torch.Tensor, ...],
     device: torch.device,
     prefix: str,
+    loss_config: StrideValueLossConfig | None = None,
 ) -> dict[str, float]:
     model.eval()
     coordinates, atom_features, atom_mask, frame_mask, goal_features, event, flux = [
@@ -264,6 +305,7 @@ def _evaluate_model(
         _, loss_metrics = stride_value_loss(
             outputs,
             StrideValueTargets(event=event, flux=flux),
+            config=loss_config,
         )
 
     scores = outputs["p_event"].detach().cpu().numpy()

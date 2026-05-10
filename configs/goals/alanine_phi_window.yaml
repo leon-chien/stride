@@ -7,8 +7,8 @@ goal:
     - resid:2&atom:CA
     - resid:2&atom:C
   operator: inside
-  threshold: -80.0
-  lower_bound: -120.0
-  upper_bound: -40.0
+  threshold: 80.0
+  lower_bound: 60.0
+  upper_bound: 100.0
   horizon_iterations: 25
   value_target: event_and_flux

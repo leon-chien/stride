@@ -167,8 +167,12 @@ First real dataset workflow:
 conda env update -f environment.yml
 conda run -n stride python scripts/download_mdshare_dataset.py alanine_dipeptide
 conda run -n stride python scripts/build_mdanalysis_dataset.py outputs/mdshare/alanine_dipeptide/alanine-dipeptide-nowater.pdb outputs/mdshare/alanine_dipeptide/alanine-dipeptide-0-250ns-nowater.xtc configs/goals/alanine_phi_window.yaml outputs/alanine_phi_stride.npz --window-size 8 --horizon 25 --stride 4
-conda run -n stride python scripts/train_atomistic.py outputs/alanine_phi_stride.npz outputs/alanine_phi_stride.pt --epochs 1 --batch-size 16 --hidden-dim 64 --egnn-layers 2 --transformer-layers 1 --transformer-heads 4 --device auto
+conda run -n stride python scripts/train_atomistic.py outputs/alanine_phi_stride.npz outputs/alanine_phi_stride.pt --epochs 1 --batch-size 16 --hidden-dim 64 --egnn-layers 2 --transformer-layers 1 --transformer-heads 4 --device auto --event-positive-weight auto
 ```
+
+The alanine phi goal currently targets a rare positive basin:
+`lower_bound: 60.0`, `upper_bound: 100.0`. The full local build produced about
+`0.0327` event positives with `--window-size 8 --horizon 25 --stride 4`.
 
 ## Next Goals
 

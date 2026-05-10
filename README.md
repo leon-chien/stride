@@ -343,10 +343,13 @@ python scripts/train_atomistic.py \
   --egnn-layers 2 \
   --transformer-layers 1 \
   --transformer-heads 4 \
-  --device auto
+  --device auto \
+  --event-positive-weight auto
 ```
 
 Use a remote GPU for longer runs after this one-epoch workflow succeeds.
+For rare-event labels, keep `--event-positive-weight auto` unless you have a
+reason to set the class weight manually.
 
 ## Example Workflows
 

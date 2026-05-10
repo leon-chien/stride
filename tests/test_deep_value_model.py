@@ -6,7 +6,7 @@ import torch
 from stride.goals import GoalSpec
 from stride.binning import combine_value_heads, scores_to_quantile_bins
 from stride.models import EGNNFrameEncoder, StrideModelConfig, StrideValueModel
-from stride.training import StrideValueTargets, stride_value_loss
+from stride.training import StrideValueLossConfig, StrideValueTargets, stride_value_loss
 
 
 def test_goal_spec_feature_vector_is_deterministic() -> None:
@@ -158,3 +158,25 @@ def test_stride_value_loss_and_quantile_binning_interfaces() -> None:
     assert edges.ndim == 1
     assert bin_ids.min() >= 0
     assert bin_ids.max() < 3
+
+
+def test_stride_value_loss_supports_positive_event_weighting() -> None:
+    outputs = {
+        "p_event": torch.tensor([0.2, 0.2]),
+        "flux_value": torch.tensor([0.0, 0.0]),
+        "uncertainty": torch.tensor([0.0, 0.0]),
+    }
+    targets = StrideValueTargets(
+        event=torch.tensor([0.0, 1.0]),
+        flux=torch.tensor([0.0, 0.0]),
+    )
+
+    unweighted_loss, _ = stride_value_loss(outputs, targets)
+    weighted_loss, metrics = stride_value_loss(
+        outputs,
+        targets,
+        config=StrideValueLossConfig(event_positive_weight=10.0),
+    )
+
+    assert weighted_loss > unweighted_loss
+    assert metrics["event_positive_weight"] == 10.0
