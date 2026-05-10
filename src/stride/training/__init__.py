@@ -1,6 +1,7 @@
 from stride.training.atomistic import (
     load_atomistic_checkpoint,
     load_dataset_and_make_config,
+    resolve_device,
     save_atomistic_checkpoint,
     score_atomistic_dataset,
     train_atomistic_value_model,
@@ -14,6 +15,7 @@ from stride.training.stride_value import (
 __all__ = [
     "load_atomistic_checkpoint",
     "load_dataset_and_make_config",
+    "resolve_device",
     "save_atomistic_checkpoint",
     "score_atomistic_dataset",
     "StrideValueLossConfig",

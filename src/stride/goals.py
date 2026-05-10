@@ -11,6 +11,7 @@ import yaml
 GOAL_TYPES = (
     "distance_threshold",
     "contact",
+    "dihedral_window",
     "rmsd_threshold",
     "state_membership",
 )
@@ -45,6 +46,8 @@ class GoalSpec:
     threshold: float
     horizon_iterations: int
     value_target: str = "event_and_flux"
+    lower_bound: float | None = None
+    upper_bound: float | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "GoalSpec":
@@ -73,13 +76,19 @@ class GoalSpec:
             threshold=float(goal["threshold"]),
             horizon_iterations=int(goal["horizon_iterations"]),
             value_target=str(goal.get("value_target", "event_and_flux")),
+            lower_bound=(
+                float(goal["lower_bound"]) if goal.get("lower_bound") is not None else None
+            ),
+            upper_bound=(
+                float(goal["upper_bound"]) if goal.get("upper_bound") is not None else None
+            ),
         )
         spec.validate()
         return spec
 
     @property
     def feature_dim(self) -> int:
-        return len(GOAL_TYPES) + len(GOAL_OPERATORS) + len(VALUE_TARGETS) + 2
+        return len(GOAL_TYPES) + len(GOAL_OPERATORS) + len(VALUE_TARGETS) + 4
 
     def validate(self) -> None:
         if self.type not in GOAL_TYPES:
@@ -90,6 +99,15 @@ class GoalSpec:
             raise ValueError(f"Unknown value target: {self.value_target}")
         if self.horizon_iterations <= 0:
             raise ValueError("horizon_iterations must be positive.")
+        if self.type == "dihedral_window":
+            if self.operator != "inside":
+                raise ValueError("dihedral_window goals require operator='inside'.")
+            if self.lower_bound is None or self.upper_bound is None:
+                raise ValueError(
+                    "dihedral_window goals require lower_bound and upper_bound."
+                )
+            if len(self.selections) != 4:
+                raise ValueError("dihedral_window goals require exactly four selections.")
 
     def to_feature_vector(self) -> np.ndarray:
         """
@@ -107,6 +125,8 @@ class GoalSpec:
         values.extend(_one_hot(self.value_target, VALUE_TARGETS))
         values.append(float(self.threshold))
         values.append(float(self.horizon_iterations))
+        values.append(float(self.lower_bound) if self.lower_bound is not None else 0.0)
+        values.append(float(self.upper_bound) if self.upper_bound is not None else 0.0)
 
         return np.asarray(values, dtype=np.float32)
 

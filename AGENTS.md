@@ -47,6 +47,10 @@ Current repository foundation:
   - Loads single-model or multi-model PDB files into STRIDE coordinates and
     `AtomRecord` metadata.
   - Converts those trajectories into the canonical `AtomisticDataset` schema.
+- `src/stride/data/mdanalysis_converter.py`
+  - Loads topology plus real MD trajectory files through MDAnalysis.
+  - Stores STRIDE real-data coordinates in nanometers by default.
+  - Converts PDB+XTC/DCD/NC/TRR-style inputs into `AtomisticDataset`.
 - `src/stride/data/sample.py`
   - Generates a tiny ASP42/ligand contact trajectory for local smoke tests.
   - Writes both `.npz` datasets and multi-model PDB files.
@@ -58,11 +62,13 @@ Current repository foundation:
 - CLI scripts:
   - `scripts/create_sample_dataset.py`
   - `scripts/build_atomistic_dataset.py`
+  - `scripts/build_mdanalysis_dataset.py`
+  - `scripts/download_mdshare_dataset.py`
   - `scripts/train_atomistic.py`
   - `scripts/score_atomistic.py`
 - Atomistic tests that pass a small protein-ligand contact dataset through the
   existing eGNN + Temporal Transformer value model.
-- PDB conversion and atomistic checkpoint tests.
+- PDB conversion, dihedral labeling, and atomistic checkpoint tests.
 
 Recent deep learning architecture additions:
 
@@ -98,6 +104,8 @@ Recent deep learning architecture additions:
 
 - The user goal should start as structured YAML/dict data, not natural language.
   This keeps label generation auditable and training reproducible.
+- `dihedral_window` goals use four exact atom selections, `operator: inside`,
+  and degree-valued `lower_bound`/`upper_bound` fields.
 - STRIDE should be simulation-agnostic. The goal is broad biological rare-event
   prediction: binding, unbinding, conformational transitions, contact
   formation, and target-state membership.
@@ -140,7 +148,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-15 passed
+16 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -153,6 +161,15 @@ conda run -n stride python scripts/score_atomistic.py outputs/sample_ligand_cont
 
 Generated files under `outputs/` are ignored and should not be committed.
 
+First real dataset workflow:
+
+```bash
+conda env update -f environment.yml
+conda run -n stride python scripts/download_mdshare_dataset.py alanine_dipeptide
+conda run -n stride python scripts/build_mdanalysis_dataset.py outputs/mdshare/alanine_dipeptide/alanine-dipeptide-nowater.pdb outputs/mdshare/alanine_dipeptide/alanine-dipeptide-0-250ns-nowater.xtc configs/goals/alanine_phi_window.yaml outputs/alanine_phi_stride.npz --window-size 8 --horizon 25 --stride 4
+conda run -n stride python scripts/train_atomistic.py outputs/alanine_phi_stride.npz outputs/alanine_phi_stride.pt --epochs 1 --batch-size 16 --hidden-dim 64 --egnn-layers 2 --transformer-layers 1 --transformer-heads 4 --device auto
+```
+
 ## Next Goals
 
 Prioritize the one-person build path. Do not jump straight to a large
@@ -164,16 +181,17 @@ WESTPA/data infrastructure exists.
    - Add optional coordinate/topology references and frame-to-segment mapping.
    - Preserve `window_mask` support for variable-length trajectory histories.
 
-2. Add higher-throughput public-MD and local-trajectory converters.
-   - The PDB converter is now the lightweight proof of the adapter contract.
-   - Next likely converter is MDAnalysis for topology + DCD/XTC/NetCDF.
+2. Validate real offline training on alanine dipeptide.
+   - Run the mdshare download, MDAnalysis dataset build, one-epoch training, and
+     scoring path.
+   - Tune window/horizon/stride only after confirming event positive rate is
+     reasonable.
    - Public MD proxy labels can train event prediction, but true flux labels
      still require WESTPA weights and descendants.
 
-3. Train on a real small biological or biophysical trajectory.
-   - Use the new training script first to validate the checkpoint workflow.
-   - Good first serious target: alanine dipeptide transition or a small
-     protein-ligand/contact trajectory with known event labels.
+3. Move longer training to a GPU server.
+   - Use laptop only for conversion and short debug epochs.
+   - Use CUDA for real multi-epoch runs once the alanine `.npz` is built.
    - Track top-k enrichment, AUPRC, calibration, and offline scoring utility.
 
 4. Connect model scoring to live WESTPA binning.

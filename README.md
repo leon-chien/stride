@@ -105,6 +105,26 @@ The structured goal is converted into deterministic numeric features, then
 passed through a learned goal encoder. This keeps the interface auditable while
 allowing one model to eventually support many targets.
 
+Dihedral-window goals are supported for small conformational benchmarks such as
+alanine dipeptide:
+
+```yaml
+goal:
+  name: alanine_phi_window
+  type: dihedral_window
+  selections:
+    - resid:1&atom:C
+    - resid:2&atom:N
+    - resid:2&atom:CA
+    - resid:2&atom:C
+  operator: inside
+  threshold: -80.0
+  lower_bound: -120.0
+  upper_bound: -40.0
+  horizon_iterations: 25
+  value_target: event_and_flux
+```
+
 ### 4. Value Heads
 
 The model produces WESTPA-facing value predictions:
@@ -159,16 +179,19 @@ Implemented:
   pcoords.
 - Delayed descendant event/flux label extraction from WESTPA lineages.
 - Multi-model PDB to atomistic STRIDE dataset conversion.
+- MDAnalysis trajectory conversion for topology plus XTC/DCD/NC/TRR-style
+  trajectory files.
+- Dihedral-window goal labels for conformational transition training.
+- mdshare alanine dipeptide download helper.
 - A generated protein-ligand contact smoke-test dataset.
 - Atomistic model training, checkpointing, and offline scoring scripts.
 - WESTPA-style value bin mapper implementing `assign(coords, mask=None,
   output=None)`.
 - Tests for goal encoding, eGNN invariance, model heads, value loss, and
-  binning, PDB conversion, and atomistic training.
+  binning, PDB conversion, dihedral labels, and atomistic training.
 
 Not complete yet:
 
-- High-throughput trajectory conversion for DCD/XTC/NetCDF formats.
 - Frame-to-segment mapping between real WESTPA walkers and coordinate files.
 - Runtime scorer that computes STRIDE scores for active WESTPA walkers inside a
   live WESTPA run.
@@ -180,6 +203,8 @@ Not complete yet:
 ```text
 src/stride/goals.py                  Structured goal specifications
 src/stride/data/atomistic.py         Atomistic dataset schema and featurization
+src/stride/data/mdanalysis_converter.py
+                                     Topology + trajectory converter
 src/stride/data/pdb_converter.py     Multi-model PDB trajectory converter
 src/stride/data/sample.py            Tiny generated atomistic smoke-test dataset
 src/stride/models/egnn.py            eGNN molecular frame encoder
@@ -210,7 +235,7 @@ pip install -e .
 ```
 
 The project currently targets Python 3.11 and uses PyTorch, NumPy,
-scikit-learn, h5py, PyYAML, and Matplotlib.
+scikit-learn, h5py, PyYAML, Matplotlib, MDAnalysis, and mdshare.
 
 ## Testing
 
@@ -230,7 +255,7 @@ conda run -n stride pytest tests
 Expected current result:
 
 ```text
-15 passed
+16 passed
 ```
 
 PyTorch may emit a Transformer nested-tensor performance warning. That warning
@@ -274,6 +299,55 @@ Score the dataset with that checkpoint:
 python scripts/score_atomistic.py outputs/sample_ligand_contact.npz outputs/sample_ligand_contact.pt outputs/sample_ligand_contact_scores.npz
 ```
 
+## First Real Dataset
+
+The recommended first real dataset is mdshare alanine dipeptide. It is small
+enough for laptop debugging and useful for validating conformational transition
+learning before moving to protein-ligand systems.
+
+Update the environment after pulling dependency changes:
+
+```bash
+conda env update -f environment.yml
+conda activate stride
+```
+
+Download alanine dipeptide:
+
+```bash
+python scripts/download_mdshare_dataset.py alanine_dipeptide
+```
+
+Build a STRIDE dataset from topology plus trajectory:
+
+```bash
+python scripts/build_mdanalysis_dataset.py \
+  outputs/mdshare/alanine_dipeptide/alanine-dipeptide-nowater.pdb \
+  outputs/mdshare/alanine_dipeptide/alanine-dipeptide-0-250ns-nowater.xtc \
+  configs/goals/alanine_phi_window.yaml \
+  outputs/alanine_phi_stride.npz \
+  --window-size 8 \
+  --horizon 25 \
+  --stride 4
+```
+
+Run a short laptop debug training job:
+
+```bash
+python scripts/train_atomistic.py \
+  outputs/alanine_phi_stride.npz \
+  outputs/alanine_phi_stride.pt \
+  --epochs 1 \
+  --batch-size 16 \
+  --hidden-dim 64 \
+  --egnn-layers 2 \
+  --transformer-layers 1 \
+  --transformer-heads 4 \
+  --device auto
+```
+
+Use a remote GPU for longer runs after this one-epoch workflow succeeds.
+
 ## Example Workflows
 
 Inspect a WESTPA HDF5 file:
@@ -300,6 +374,23 @@ dataset = build_atomistic_dataset_from_pdb(
     goal=goal,
     window_size=4,
     horizon=2,
+)
+```
+
+Use a real MD trajectory through MDAnalysis:
+
+```python
+from stride.data import build_atomistic_dataset_from_mdanalysis
+from stride.goals import GoalSpec
+
+goal = GoalSpec.from_yaml("configs/goals/alanine_phi_window.yaml")
+dataset = build_atomistic_dataset_from_mdanalysis(
+    "outputs/mdshare/alanine_dipeptide/alanine-dipeptide-nowater.pdb",
+    "outputs/mdshare/alanine_dipeptide/alanine-dipeptide-0-250ns-nowater.xtc",
+    goal=goal,
+    window_size=8,
+    horizon=25,
+    stride=4,
 )
 ```
 

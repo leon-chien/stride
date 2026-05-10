@@ -17,7 +17,10 @@ dependencies = [
     "pyyaml",
     "matplotlib",
     "scikit-learn",
-    "torch"
+    "torch",
+    "h5py",
+    "MDAnalysis",
+    "mdshare"
 ]
 
 [tool.setuptools.packages.find]

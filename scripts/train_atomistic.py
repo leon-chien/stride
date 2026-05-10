@@ -20,6 +20,12 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--validation-fraction", type=float, default=0.2)
+    parser.add_argument(
+        "--split-strategy",
+        choices=("contiguous", "random"),
+        default="contiguous",
+        help="Use contiguous validation windows by default to reduce trajectory leakage.",
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--egnn-layers", type=int, default=3)
@@ -27,7 +33,7 @@ def main() -> None:
     parser.add_argument("--transformer-heads", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--radius", type=float, default=None)
-    parser.add_argument("--device", default=None)
+    parser.add_argument("--device", default="auto")
     args = parser.parse_args()
 
     dataset, config = load_dataset_and_make_config(
@@ -48,8 +54,23 @@ def main() -> None:
         validation_fraction=args.validation_fraction,
         seed=args.seed,
         device=args.device,
+        split_strategy=args.split_strategy,
     )
-    save_atomistic_checkpoint(args.checkpoint, model, metrics)
+    save_atomistic_checkpoint(
+        args.checkpoint,
+        model,
+        metrics,
+        metadata={
+            "dataset_npz": str(args.dataset_npz),
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "learning_rate": args.learning_rate,
+            "validation_fraction": args.validation_fraction,
+            "split_strategy": args.split_strategy,
+            "seed": args.seed,
+            "device": args.device,
+        },
+    )
 
     print(f"Dataset: {args.dataset_npz}")
     print(f"Checkpoint: {args.checkpoint}")

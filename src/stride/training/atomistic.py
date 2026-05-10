@@ -22,6 +22,7 @@ def train_atomistic_value_model(
     validation_fraction: float = 0.2,
     seed: int = 7,
     device: str | None = None,
+    split_strategy: str = "contiguous",
 ) -> tuple[StrideValueModel, dict[str, float]]:
     """
     Train STRIDE's goal-conditioned value model on an AtomisticDataset.
@@ -33,12 +34,13 @@ def train_atomistic_value_model(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    device_obj = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device_obj = resolve_device(device)
     train_loader, val_tensors = _make_loaders(
         dataset=dataset,
         batch_size=batch_size,
         validation_fraction=validation_fraction,
         seed=seed,
+        split_strategy=split_strategy,
     )
 
     model = StrideValueModel(config).to(device_obj)
@@ -86,7 +88,7 @@ def score_atomistic_dataset(
     Score every example in an AtomisticDataset with a trained STRIDE model.
     """
     dataset.validate()
-    device_obj = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device_obj = resolve_device(device)
     model = model.to(device_obj)
     model.eval()
 
@@ -121,6 +123,7 @@ def save_atomistic_checkpoint(
     path: str | Path,
     model: StrideValueModel,
     metrics: dict[str, float] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +132,7 @@ def save_atomistic_checkpoint(
             "model_state_dict": model.state_dict(),
             "config": asdict(model.config),
             "metrics": metrics or {},
+            "metadata": metadata or {},
         },
         path,
     )
@@ -138,13 +142,32 @@ def load_atomistic_checkpoint(
     path: str | Path,
     device: str | None = None,
 ) -> tuple[StrideValueModel, dict[str, float]]:
-    device_obj = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device_obj = resolve_device(device)
     checkpoint = torch.load(path, map_location=device_obj)
     config = StrideModelConfig(**checkpoint["config"])
     model = StrideValueModel(config)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device_obj)
     return model, dict(checkpoint.get("metrics", {}))
+
+
+def resolve_device(device: str | None = None) -> torch.device:
+    """
+    Resolve auto/cpu/cuda/mps device selection for local and remote training.
+    """
+    value = (device or "auto").lower()
+    if value == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if value == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA was requested but is not available.")
+    if value == "mps":
+        if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
+            raise ValueError("MPS was requested but is not available.")
+    return torch.device(value)
 
 
 def load_dataset_and_make_config(
@@ -175,20 +198,27 @@ def _make_loaders(
     batch_size: int,
     validation_fraction: float,
     seed: int,
+    split_strategy: str,
 ) -> tuple[DataLoader, tuple[torch.Tensor, ...] | None]:
     tensor_dataset = _to_tensor_dataset(dataset)
     num_examples = len(tensor_dataset)
-    generator = torch.Generator().manual_seed(seed)
-    indices = torch.randperm(num_examples, generator=generator)
-
     val_count = int(round(num_examples * validation_fraction))
     if num_examples < 3:
         val_count = 0
     else:
         val_count = min(max(val_count, 1), num_examples - 1)
 
-    val_indices = indices[:val_count]
-    train_indices = indices[val_count:]
+    if split_strategy == "random":
+        generator = torch.Generator().manual_seed(seed)
+        indices = torch.randperm(num_examples, generator=generator)
+        val_indices = indices[:val_count]
+        train_indices = indices[val_count:]
+    elif split_strategy == "contiguous":
+        split_at = num_examples - val_count
+        train_indices = torch.arange(0, split_at)
+        val_indices = torch.arange(split_at, num_examples)
+    else:
+        raise ValueError("split_strategy must be 'contiguous' or 'random'.")
 
     train_subset = torch.utils.data.Subset(tensor_dataset, train_indices.tolist())
     train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)

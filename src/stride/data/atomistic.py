@@ -300,9 +300,13 @@ def _future_event_label(
     atoms: list[AtomRecord],
     goal: GoalSpec,
 ) -> int:
+    if goal.type == "dihedral_window":
+        return _future_dihedral_window_label(future_coordinates, atoms, goal)
+
     if goal.type not in {"contact", "distance_threshold"}:
         raise NotImplementedError(
-            "Atomistic proxy labels currently support contact and distance_threshold goals."
+            "Atomistic proxy labels currently support contact, distance_threshold, "
+            "and dihedral_window goals."
         )
     if goal.operator != "less_than":
         raise NotImplementedError("Atomistic proxy labels currently support less_than.")
@@ -323,6 +327,68 @@ def _future_event_label(
     return 0
 
 
+def _future_dihedral_window_label(
+    future_coordinates: np.ndarray,
+    atoms: list[AtomRecord],
+    goal: GoalSpec,
+) -> int:
+    goal.validate()
+    atom_indices = []
+    for selection in goal.selections:
+        mask = atom_selection_mask(atoms, selection)
+        matches = np.flatnonzero(mask)
+        if len(matches) != 1:
+            raise ValueError(
+                "Dihedral selections must each match exactly one atom; "
+                f"{selection!r} matched {len(matches)} atoms."
+            )
+        atom_indices.append(int(matches[0]))
+
+    lower = float(goal.lower_bound)
+    upper = float(goal.upper_bound)
+    for frame in future_coordinates:
+        angle = compute_dihedral_degrees(frame[atom_indices])
+        if _angle_inside_window(angle, lower, upper):
+            return 1
+    return 0
+
+
+def compute_dihedral_degrees(points: np.ndarray) -> float:
+    """
+    Compute a signed dihedral angle in degrees for four 3D points.
+    """
+    points = np.asarray(points, dtype=np.float64)
+    if points.shape != (4, 3):
+        raise ValueError(f"Expected points shape (4, 3), got {points.shape}.")
+
+    p0, p1, p2, p3 = points
+    b0 = -(p1 - p0)
+    b1 = p2 - p1
+    b2 = p3 - p2
+
+    b1_norm = np.linalg.norm(b1)
+    if b1_norm == 0.0:
+        raise ValueError("Cannot compute dihedral with coincident middle atoms.")
+    b1 = b1 / b1_norm
+
+    v = b0 - np.dot(b0, b1) * b1
+    w = b2 - np.dot(b2, b1) * b1
+
+    x = np.dot(v, w)
+    y = np.dot(np.cross(b1, v), w)
+    return float(np.degrees(np.arctan2(y, x)))
+
+
+def _angle_inside_window(angle: float, lower: float, upper: float) -> bool:
+    angle = ((angle + 180.0) % 360.0) - 180.0
+    lower = ((lower + 180.0) % 360.0) - 180.0
+    upper = ((upper + 180.0) % 360.0) - 180.0
+
+    if lower <= upper:
+        return lower <= angle <= upper
+    return angle >= lower or angle <= upper
+
+
 def _min_pair_distance(coords_a: np.ndarray, coords_b: np.ndarray) -> float:
     deltas = coords_a[:, None, :] - coords_b[None, :, :]
     distances = np.linalg.norm(deltas, axis=-1)
@@ -332,6 +398,9 @@ def _min_pair_distance(coords_a: np.ndarray, coords_b: np.ndarray) -> float:
 def _atom_matches(atom: AtomRecord, selection: str) -> bool:
     text = selection.strip()
     lower = text.lower()
+
+    if "&" in text:
+        return all(_atom_matches(atom, part) for part in text.split("&"))
 
     if lower == "protein":
         return atom.is_protein

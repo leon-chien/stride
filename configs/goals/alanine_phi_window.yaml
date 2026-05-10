@@ -1,0 +1,14 @@
+goal:
+  name: alanine_phi_window
+  type: dihedral_window
+  selections:
+    - resid:1&atom:C
+    - resid:2&atom:N
+    - resid:2&atom:CA
+    - resid:2&atom:C
+  operator: inside
+  threshold: -80.0
+  lower_bound: -120.0
+  upper_bound: -40.0
+  horizon_iterations: 25
+  value_target: event_and_flux

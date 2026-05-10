@@ -13,6 +13,10 @@ dependencies:
   - scikit-learn
   - pandas
   - scipy
+  - h5py
+  - pytest
+  - mdanalysis
 
   - pip:
       - torch
+      - mdshare

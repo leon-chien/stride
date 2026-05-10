@@ -3,6 +3,7 @@ from stride.data.atomistic import (
     AtomisticDataset,
     atom_selection_mask,
     build_atomistic_windows,
+    compute_dihedral_degrees,
     compute_atom_features,
     load_atomistic_dataset_npz,
     save_atomistic_dataset_npz,
@@ -10,6 +11,10 @@ from stride.data.atomistic import (
 from stride.data.pdb_converter import (
     build_atomistic_dataset_from_pdb,
     load_pdb_trajectory,
+)
+from stride.data.mdanalysis_converter import (
+    build_atomistic_dataset_from_mdanalysis,
+    load_mdanalysis_trajectory,
 )
 from stride.data.sample import (
     build_sample_ligand_contact_dataset,
@@ -25,10 +30,13 @@ __all__ = [
     "AtomisticDataset",
     "atom_selection_mask",
     "build_atomistic_dataset_from_pdb",
+    "build_atomistic_dataset_from_mdanalysis",
     "build_atomistic_windows",
     "build_sample_ligand_contact_dataset",
+    "compute_dihedral_degrees",
     "compute_atom_features",
     "load_atomistic_dataset_npz",
+    "load_mdanalysis_trajectory",
     "load_pdb_trajectory",
     "sample_ligand_contact_atoms",
     "sample_ligand_contact_coordinates",
