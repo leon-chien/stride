@@ -221,6 +221,7 @@ checkpoints/
 outputs/
 *.pt
 *.npz
+*.h5
+*.h5.tar.gz
 
-AGENTS.md
 .DS_Store
