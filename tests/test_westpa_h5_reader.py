@@ -6,11 +6,14 @@ import numpy as np
 from stride.goals import GoalSpec
 from stride.westpa_plugin.h5_reader import (
     SegmentKey,
+    SegmentCoordinateStore,
+    build_coordinate_atomistic_dataset,
     build_lineage_windows,
     compute_delayed_labels,
     extract_pcoord_window,
     load_segment_records,
     save_lineage_windows_npz,
+    save_westpa_atomistic_dataset_npz,
 )
 
 
@@ -110,6 +113,52 @@ def test_save_lineage_windows_pads_short_windows(tmp_path) -> None:
     assert data["pcoord_windows"].shape == (7, 3, 1)
     assert data["window_mask"].shape == (7, 3)
     assert data["window_mask"][0].tolist() == [False, False, True]
+
+
+def test_build_coordinate_atomistic_dataset_with_westpa_provenance(tmp_path) -> None:
+    h5_path = tmp_path / "west.h5"
+    output_path = tmp_path / "westpa_atomistic.npz"
+    _write_tiny_westpa_h5(h5_path)
+
+    records = load_segment_records(h5_path)
+    keys = sorted(records, key=lambda item: (item.n_iter, item.seg_id))
+    coordinates = np.zeros((len(keys), 2, 3), dtype=np.float32)
+    for index, key in enumerate(keys):
+        coordinates[index, :, 0] = float(key.n_iter)
+        coordinates[index, :, 1] = float(key.seg_id)
+
+    store = SegmentCoordinateStore(
+        coordinates=coordinates,
+        n_iter=np.asarray([key.n_iter for key in keys], dtype=np.int64),
+        seg_id=np.asarray([key.seg_id for key in keys], dtype=np.int64),
+        atom_features=np.ones((len(keys), 2, 3), dtype=np.float32),
+        atom_mask=np.ones((len(keys), 2), dtype=bool),
+    )
+    goal = GoalSpec(
+        name="association",
+        type="distance_threshold",
+        selections=("a", "b"),
+        operator="less_than",
+        threshold=0.35,
+        horizon_iterations=2,
+    )
+
+    dataset, provenance = build_coordinate_atomistic_dataset(
+        records=records,
+        coordinates=store,
+        goal=goal,
+        window_iterations=2,
+    )
+    save_westpa_atomistic_dataset_npz(output_path, dataset, provenance)
+
+    assert dataset.coordinates.shape == (5, 2, 2, 3)
+    assert dataset.frame_mask.all()
+    assert provenance["westpa_lineage_n_iter"].shape == (5, 2)
+    assert provenance["westpa_weights"].shape == (5,)
+
+    data = np.load(output_path)
+    assert data["coordinates"].shape == dataset.coordinates.shape
+    assert data["westpa_n_iter"].shape == (5,)
 
 
 def _write_tiny_westpa_h5(path) -> None:

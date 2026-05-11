@@ -7,6 +7,7 @@ import h5py
 import numpy as np
 
 from stride.goals import GoalSpec
+from stride.data import AtomisticDataset
 
 
 @dataclass
@@ -81,6 +82,34 @@ class LineageWindow:
     flux: float
     weight: float
     goal_features: np.ndarray
+
+
+@dataclass(frozen=True)
+class SegmentCoordinateStore:
+    """
+    Coordinate frames keyed by WESTPA segment identity.
+    """
+
+    coordinates: np.ndarray
+    n_iter: np.ndarray
+    seg_id: np.ndarray
+    atom_features: np.ndarray
+    atom_mask: np.ndarray
+
+    def validate(self) -> None:
+        if self.coordinates.ndim != 3 or self.coordinates.shape[-1] != 3:
+            raise ValueError("coordinates must have shape [segments, atoms, 3].")
+        num_segments, num_atoms, _ = self.coordinates.shape
+        if self.n_iter.shape != (num_segments,):
+            raise ValueError("n_iter must have one value per coordinate frame.")
+        if self.seg_id.shape != (num_segments,):
+            raise ValueError("seg_id must have one value per coordinate frame.")
+        if self.atom_features.shape[:2] != (num_segments, num_atoms):
+            raise ValueError(
+                "atom_features must have shape [segments, atoms, features]."
+            )
+        if self.atom_mask.shape != (num_segments, num_atoms):
+            raise ValueError("atom_mask must have shape [segments, atoms].")
 
 
 def list_h5_datasets(h5_path: str | Path) -> list[H5DatasetInfo]:
@@ -528,6 +557,205 @@ def build_lineage_windows(
         )
 
     return windows
+
+
+def load_segment_coordinate_store_npz(path: str | Path) -> SegmentCoordinateStore:
+    """
+    Load per-segment coordinate frames keyed by WESTPA (n_iter, seg_id).
+
+    Expected arrays:
+        coordinates: [segments, atoms, 3]
+        n_iter: [segments]
+        seg_id: [segments]
+        atom_features: [segments, atoms, features] or [atoms, features]
+        atom_mask: optional [segments, atoms] or [atoms]
+    """
+    data = np.load(path)
+    coordinates = data["coordinates"].astype(np.float32)
+    n_iter = data["n_iter"].astype(np.int64)
+    seg_id = data["seg_id"].astype(np.int64)
+    num_segments, num_atoms, _ = coordinates.shape
+
+    if "atom_features" in data:
+        atom_features = data["atom_features"].astype(np.float32)
+        if atom_features.ndim == 2:
+            atom_features = np.broadcast_to(
+                atom_features[None, :, :],
+                (num_segments, num_atoms, atom_features.shape[-1]),
+            ).copy()
+    else:
+        atom_features = np.ones((num_segments, num_atoms, 1), dtype=np.float32)
+
+    if "atom_mask" in data:
+        atom_mask = data["atom_mask"].astype(bool)
+        if atom_mask.ndim == 1:
+            atom_mask = np.broadcast_to(
+                atom_mask[None, :],
+                (num_segments, num_atoms),
+            ).copy()
+    else:
+        atom_mask = np.ones((num_segments, num_atoms), dtype=bool)
+
+    store = SegmentCoordinateStore(
+        coordinates=coordinates,
+        n_iter=n_iter,
+        seg_id=seg_id,
+        atom_features=atom_features,
+        atom_mask=atom_mask,
+    )
+    store.validate()
+    return store
+
+
+def build_coordinate_atomistic_dataset(
+    records: dict[SegmentKey, SegmentRecord],
+    coordinates: SegmentCoordinateStore,
+    goal: GoalSpec,
+    window_iterations: int,
+    horizon_iterations: int | None = None,
+    pcoord_frame_index: int = -1,
+    pcoord_dim: int = 0,
+    require_full_window: bool = True,
+    include_self_in_label: bool = False,
+) -> tuple[AtomisticDataset, dict[str, np.ndarray]]:
+    """
+    Build coordinate lineage windows with delayed WESTPA pcoord labels.
+
+    This is the coordinate-aware bridge from WESTPA segment identities to the
+    canonical atomistic model input. Labels still use the auditable delayed
+    descendant machinery; coordinate-aware labelers can be added behind the same
+    output contract later.
+    """
+    coordinates.validate()
+    coordinate_index = {
+        SegmentKey(int(n_iter), int(seg_id)): index
+        for index, (n_iter, seg_id) in enumerate(
+            zip(coordinates.n_iter, coordinates.seg_id, strict=True)
+        )
+    }
+    labels = compute_delayed_labels(
+        records=records,
+        goal=goal,
+        horizon_iterations=horizon_iterations,
+        pcoord_frame_index=pcoord_frame_index,
+        pcoord_dim=pcoord_dim,
+        include_self=include_self_in_label,
+    )
+    goal_features = goal.to_feature_vector()
+    num_atoms = coordinates.coordinates.shape[1]
+    atom_feature_dim = coordinates.atom_features.shape[-1]
+
+    window_coordinates: list[np.ndarray] = []
+    window_atom_features: list[np.ndarray] = []
+    window_atom_masks: list[np.ndarray] = []
+    frame_masks: list[np.ndarray] = []
+    event_labels: list[float] = []
+    flux_labels: list[float] = []
+    source_frame_start: list[int] = []
+    current_n_iter: list[int] = []
+    current_seg_id: list[int] = []
+    lineage_n_iter: list[np.ndarray] = []
+    lineage_seg_id: list[np.ndarray] = []
+    weights: list[float] = []
+
+    for key in sorted(records, key=lambda item: (item.n_iter, item.seg_id)):
+        lineage = trace_ancestor_keys(records, key, window_iterations)
+        available = [lineage_key for lineage_key in lineage if lineage_key in coordinate_index]
+        if require_full_window and len(available) < window_iterations:
+            continue
+        if not available:
+            continue
+
+        padded_coords = np.zeros(
+            (window_iterations, num_atoms, 3),
+            dtype=np.float32,
+        )
+        padded_atom_features = np.zeros(
+            (num_atoms, atom_feature_dim),
+            dtype=np.float32,
+        )
+        padded_atom_mask = np.zeros((num_atoms,), dtype=bool)
+        frame_mask = np.zeros((window_iterations,), dtype=bool)
+        padded_lineage_n_iter = np.full((window_iterations,), -1, dtype=np.int64)
+        padded_lineage_seg_id = np.full((window_iterations,), -1, dtype=np.int64)
+
+        trimmed = available[-window_iterations:]
+        offset = window_iterations - len(trimmed)
+        for window_index, lineage_key in enumerate(trimmed, start=offset):
+            coordinate_index_value = coordinate_index[lineage_key]
+            padded_coords[window_index] = coordinates.coordinates[coordinate_index_value]
+            padded_lineage_n_iter[window_index] = lineage_key.n_iter
+            padded_lineage_seg_id[window_index] = lineage_key.seg_id
+            frame_mask[window_index] = True
+
+        current_coordinate_index = coordinate_index[trimmed[-1]]
+        padded_atom_features[:] = coordinates.atom_features[current_coordinate_index]
+        padded_atom_mask[:] = coordinates.atom_mask[current_coordinate_index]
+
+        label = labels[key]
+        window_coordinates.append(padded_coords)
+        window_atom_features.append(padded_atom_features)
+        window_atom_masks.append(padded_atom_mask)
+        frame_masks.append(frame_mask)
+        event_labels.append(float(label.event))
+        flux_labels.append(float(label.flux))
+        source_frame_start.append(int(key.n_iter))
+        current_n_iter.append(int(key.n_iter))
+        current_seg_id.append(int(key.seg_id))
+        lineage_n_iter.append(padded_lineage_n_iter)
+        lineage_seg_id.append(padded_lineage_seg_id)
+        weights.append(float(records[key].weight))
+
+    if not window_coordinates:
+        raise ValueError("No coordinate lineage windows could be built.")
+
+    dataset = AtomisticDataset(
+        coordinates=np.stack(window_coordinates).astype(np.float32),
+        atom_features=np.stack(window_atom_features).astype(np.float32),
+        atom_mask=np.stack(window_atom_masks).astype(bool),
+        frame_mask=np.stack(frame_masks).astype(bool),
+        goal_features=np.broadcast_to(
+            goal_features[None, :],
+            (len(window_coordinates), goal_features.shape[0]),
+        ).copy(),
+        event_labels=np.asarray(event_labels, dtype=np.float32),
+        flux_labels=np.asarray(flux_labels, dtype=np.float32),
+        source_frame_start=np.asarray(source_frame_start, dtype=np.int64),
+    )
+    dataset.validate()
+    provenance = {
+        "westpa_n_iter": np.asarray(current_n_iter, dtype=np.int64),
+        "westpa_seg_id": np.asarray(current_seg_id, dtype=np.int64),
+        "westpa_lineage_n_iter": np.stack(lineage_n_iter).astype(np.int64),
+        "westpa_lineage_seg_id": np.stack(lineage_seg_id).astype(np.int64),
+        "westpa_weights": np.asarray(weights, dtype=np.float64),
+    }
+    return dataset, provenance
+
+
+def save_westpa_atomistic_dataset_npz(
+    output_path: str | Path,
+    dataset: AtomisticDataset,
+    provenance: dict[str, np.ndarray],
+) -> None:
+    """
+    Save a canonical atomistic dataset plus WESTPA provenance arrays.
+    """
+    dataset.validate()
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        output_path,
+        coordinates=dataset.coordinates,
+        atom_features=dataset.atom_features,
+        atom_mask=dataset.atom_mask,
+        frame_mask=dataset.frame_mask,
+        goal_features=dataset.goal_features,
+        event_labels=dataset.event_labels,
+        flux_labels=dataset.flux_labels,
+        source_frame_start=dataset.source_frame_start,
+        **provenance,
+    )
 
 
 def save_lineage_windows_npz(

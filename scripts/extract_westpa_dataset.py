@@ -6,8 +6,11 @@ from pathlib import Path
 from stride.goals import GoalSpec
 from stride.westpa_plugin.h5_reader import (
     build_lineage_windows,
+    build_coordinate_atomistic_dataset,
+    load_segment_coordinate_store_npz,
     load_segment_records,
     save_lineage_windows_npz,
+    save_westpa_atomistic_dataset_npz,
 )
 
 
@@ -27,11 +30,42 @@ def main() -> None:
         action="store_true",
         help="Include early-iteration windows shorter than --window-iterations.",
     )
+    parser.add_argument(
+        "--segment-coordinates-npz",
+        type=Path,
+        default=None,
+        help=(
+            "Optional per-segment coordinate store with coordinates, n_iter, "
+            "seg_id, and optional atom_features/atom_mask arrays."
+        ),
+    )
 
     args = parser.parse_args()
 
     goal = GoalSpec.from_yaml(args.goal_yaml)
     records = load_segment_records(args.west_h5)
+    if args.segment_coordinates_npz is not None:
+        coordinate_store = load_segment_coordinate_store_npz(
+            args.segment_coordinates_npz
+        )
+        dataset, provenance = build_coordinate_atomistic_dataset(
+            records=records,
+            coordinates=coordinate_store,
+            goal=goal,
+            window_iterations=args.window_iterations,
+            horizon_iterations=args.horizon_iterations,
+            pcoord_frame_index=args.pcoord_frame_index,
+            pcoord_dim=args.pcoord_dim,
+            require_full_window=not args.allow_short_windows,
+        )
+        save_westpa_atomistic_dataset_npz(args.output_npz, dataset, provenance)
+        print(f"Loaded segments: {len(records)}")
+        print(f"Saved coordinate windows: {len(dataset.event_labels)}")
+        print(f"Positive event rate: {dataset.event_labels.mean():.4f}")
+        print(f"Total labeled flux: {dataset.flux_labels.sum():.6g}")
+        print(f"Output: {args.output_npz}")
+        return
+
     windows = build_lineage_windows(
         records=records,
         goal=goal,

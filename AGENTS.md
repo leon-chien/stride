@@ -38,8 +38,19 @@ Current repository foundation:
   window extraction.
 - A `scripts/extract_westpa_dataset.py` CLI that turns a `west.h5` file and a
   structured goal YAML into a STRIDE `.npz` training artifact.
+- Optional coordinate-aware WESTPA extraction:
+  - `scripts/extract_westpa_dataset.py --segment-coordinates-npz ...` maps
+    segment keyed coordinate frames into canonical atomistic lineage windows.
+  - WESTPA provenance arrays are saved alongside atomistic datasets:
+    `westpa_n_iter`, `westpa_seg_id`, lineage keys, and segment weights.
+- WESTPA lineage evaluation:
+  - `scripts/evaluate_westpa_lineage.py` evaluates pcoord lineage artifacts
+    against pcoord baselines under held-out iteration splits.
 - A WESTPA-style `StrideValueBinMapper` that implements `assign(coords,
   mask=None, output=None)` for scalar STRIDE value scores.
+- A `StrideRuntimeScorer` adapter that scores active atomistic walker histories
+  with a checkpoint and falls back to configured scalar scores if model loading
+  or scoring fails.
 - Canonical atomistic STRIDE dataset utilities in `src/stride/data/atomistic.py`
   for coordinate windows, atom/residue features, atom masks, frame masks, goal
   features, proxy event labels, and `.npz` save/load.
@@ -67,6 +78,7 @@ Current repository foundation:
   - `scripts/train_atomistic.py`
   - `scripts/score_atomistic.py`
   - `scripts/evaluate_atomistic.py`
+  - `scripts/evaluate_westpa_lineage.py`
 - Atomistic tests that pass a small protein-ligand contact dataset through the
   existing eGNN + Temporal Transformer value model.
 - PDB conversion, dihedral labeling, and atomistic checkpoint tests.
@@ -159,7 +171,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-25 passed
+29 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -196,6 +208,12 @@ Evaluation report example:
 conda run -n stride python scripts/evaluate_atomistic.py outputs/alanine_phi_stride_rare.npz --checkpoint outputs/alanine_phi_gpu_w2_lr1e4.best.pt --goal-yaml configs/goals/alanine_phi_window.yaml --topology-pdb outputs/mdshare/alanine_dipeptide/alanine-dipeptide-nowater.pdb --output-dir outputs/reports/alanine_phi_gpu_w2_lr1e4
 ```
 
+WESTPA lineage report example:
+
+```bash
+conda run -n stride python scripts/evaluate_westpa_lineage.py outputs/stride_dataset.npz --eval-split validation --iteration-split-strategy tail --output-dir outputs/reports/westpa_lineage_validation
+```
+
 First real dataset workflow:
 
 ```bash
@@ -215,10 +233,11 @@ Prioritize the one-person build path. Do not jump straight to a large
 foundation model, and do not do more serious training until generalized
 WESTPA/data infrastructure exists.
 
-1. Expand the WESTPA dataset bridge from pcoord-only to coordinate-aware data.
+1. Use the WESTPA dataset bridge on a real or fixture WESTPA run.
    - Keep the existing pcoord lineage extractor as the smoke-test path.
-   - Add optional coordinate/topology references and frame-to-segment mapping.
-   - Preserve `window_mask` support for variable-length trajectory histories.
+   - Provide a segment coordinate `.npz` keyed by `n_iter` and `seg_id` when
+     training the atomistic path from WESTPA lineages.
+   - Preserve `window_mask`/`frame_mask` support for variable-length histories.
 
 2. Validate real offline training on alanine dipeptide.
    - Run the mdshare download, MDAnalysis dataset build, one-epoch training, and
@@ -235,9 +254,9 @@ WESTPA/data infrastructure exists.
 
 4. Connect model scoring to live WESTPA binning.
    - Use `StrideValueBinMapper` as the WESTPA-facing assignment surface.
-   - Add a runtime scorer that computes STRIDE scores from active walker
-     histories and exposes them to the mapper.
-   - Include fallback to simple value/distance bins if model loading fails.
+   - Start from `StrideRuntimeScorer`, which computes STRIDE scores from active
+     walker histories and exposes them to the mapper.
+   - Keep fallback to simple value/distance bins if model loading fails.
 
 5. Add full coordinate data support for the eGNN path.
    - Define atom feature construction.

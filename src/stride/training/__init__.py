@@ -19,6 +19,11 @@ from stride.training.stride_value import (
     StrideValueTargets,
     stride_value_loss,
 )
+from stride.training.westpa_evaluation import (
+    pcoord_baseline_rankers,
+    westpa_iteration_split_indices,
+    write_westpa_lineage_report,
+)
 
 __all__ = [
     "load_atomistic_checkpoint",
@@ -33,7 +38,10 @@ __all__ = [
     "random_baseline_scores",
     "StrideValueLossConfig",
     "StrideValueTargets",
+    "pcoord_baseline_rankers",
     "stride_value_loss",
     "train_atomistic_value_model",
+    "westpa_iteration_split_indices",
     "write_evaluation_report",
+    "write_westpa_lineage_report",
 ]
