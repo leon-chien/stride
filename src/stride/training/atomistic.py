@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import torch
@@ -28,6 +29,7 @@ def train_atomistic_value_model(
     device: str | None = None,
     split_strategy: str = "contiguous",
     event_positive_weight: float | str = "auto",
+    progress_callback: Callable[[int, int, dict[str, float]], None] | None = None,
 ) -> tuple[StrideValueModel, dict[str, float]]:
     """
     Train STRIDE's goal-conditioned value model on an AtomisticDataset.
@@ -95,6 +97,8 @@ def train_atomistic_value_model(
                 )
             )
         metrics["event_positive_weight"] = float(loss_config.event_positive_weight)
+        if progress_callback is not None:
+            progress_callback(epoch, epochs, dict(metrics))
 
     return model, metrics
 

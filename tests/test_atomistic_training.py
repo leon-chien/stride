@@ -16,6 +16,41 @@ from stride.training import (
 from stride.models import StrideModelConfig
 
 
+def test_atomistic_training_progress_callback_runs_each_epoch() -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+    config = StrideModelConfig(
+        atom_feature_dim=dataset.atom_features.shape[-1],
+        goal_feature_dim=dataset.goal_features.shape[-1],
+        hidden_dim=16,
+        egnn_layers=1,
+        transformer_layers=1,
+        transformer_heads=4,
+        dropout=0.0,
+    )
+    calls = []
+
+    train_atomistic_value_model(
+        dataset=dataset,
+        config=config,
+        epochs=2,
+        batch_size=4,
+        validation_fraction=0.25,
+        seed=17,
+        device="cpu",
+        progress_callback=lambda epoch, total, metrics: calls.append(
+            (epoch, total, metrics["train_loss"])
+        ),
+    )
+
+    assert len(calls) == 2
+    assert calls[0][0:2] == (1, 2)
+    assert calls[1][0:2] == (2, 2)
+
+
 def test_atomistic_training_checkpoint_and_scoring(tmp_path) -> None:
     dataset = build_sample_ligand_contact_dataset(
         window_size=4,

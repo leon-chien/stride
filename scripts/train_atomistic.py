@@ -39,6 +39,11 @@ def main() -> None:
         default="auto",
         help="Positive event class weight. Use 'auto' for negative/positive ratio.",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Only print final metrics, not per-epoch progress.",
+    )
     args = parser.parse_args()
 
     dataset, config = load_dataset_and_make_config(
@@ -61,6 +66,7 @@ def main() -> None:
         device=args.device,
         split_strategy=args.split_strategy,
         event_positive_weight=_parse_event_positive_weight(args.event_positive_weight),
+        progress_callback=None if args.quiet else _print_epoch_progress,
     )
     save_atomistic_checkpoint(
         args.checkpoint,
@@ -83,6 +89,19 @@ def main() -> None:
     print(f"Checkpoint: {args.checkpoint}")
     for key in sorted(metrics):
         print(f"{key}: {metrics[key]:.6g}")
+
+
+def _print_epoch_progress(epoch: int, total_epochs: int, metrics: dict[str, float]) -> None:
+    fields = [
+        f"epoch {epoch}/{total_epochs}",
+        f"train_loss={metrics.get('train_loss', float('nan')):.6g}",
+        f"event_positive_weight={metrics.get('event_positive_weight', float('nan')):.6g}",
+    ]
+    for key in ("val_loss", "val_auroc", "val_auprc", "val_top25_enrichment"):
+        if key in metrics:
+            fields.append(f"{key}={metrics[key]:.6g}")
+    print(" | ".join(fields), flush=True)
+
 
 def _parse_event_positive_weight(value: str) -> float | str:
     if value == "auto":
