@@ -40,7 +40,7 @@ def train_atomistic_value_model(
     np.random.seed(seed)
 
     device_obj = resolve_device(device)
-    train_loader, val_tensors = _make_loaders(
+    train_loader, val_loader = _make_loaders(
         dataset=dataset,
         batch_size=batch_size,
         validation_fraction=validation_fraction,
@@ -84,11 +84,11 @@ def train_atomistic_value_model(
             epoch_losses.append(loss_metrics["loss"])
 
         metrics = {"epoch": float(epoch), "train_loss": float(np.mean(epoch_losses))}
-        if val_tensors is not None:
+        if val_loader is not None:
             metrics.update(
                 _evaluate_model(
                     model,
-                    val_tensors,
+                    val_loader,
                     device_obj,
                     prefix="val_",
                     loss_config=loss_config,
@@ -239,7 +239,7 @@ def _make_loaders(
     validation_fraction: float,
     seed: int,
     split_strategy: str,
-) -> tuple[DataLoader, tuple[torch.Tensor, ...] | None]:
+) -> tuple[DataLoader, DataLoader | None]:
     tensor_dataset = _to_tensor_dataset(dataset)
     num_examples = len(tensor_dataset)
     val_count = int(round(num_examples * validation_fraction))
@@ -263,12 +263,12 @@ def _make_loaders(
     train_subset = torch.utils.data.Subset(tensor_dataset, train_indices.tolist())
     train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
 
-    val_tensors = None
+    val_loader = None
     if val_count > 0:
-        tensors = tuple(tensor[val_indices] for tensor in tensor_dataset.tensors)
-        val_tensors = tensors
+        val_subset = torch.utils.data.Subset(tensor_dataset, val_indices.tolist())
+        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
 
-    return train_loader, val_tensors
+    return train_loader, val_loader
 
 
 def _to_tensor_dataset(dataset: AtomisticDataset) -> TensorDataset:
@@ -285,34 +285,46 @@ def _to_tensor_dataset(dataset: AtomisticDataset) -> TensorDataset:
 
 def _evaluate_model(
     model: StrideValueModel,
-    tensors: tuple[torch.Tensor, ...],
+    loader: DataLoader,
     device: torch.device,
     prefix: str,
     loss_config: StrideValueLossConfig | None = None,
 ) -> dict[str, float]:
     model.eval()
-    coordinates, atom_features, atom_mask, frame_mask, goal_features, event, flux = [
-        tensor.to(device) for tensor in tensors
-    ]
-    with torch.no_grad():
-        outputs = model(
-            coordinates=coordinates,
-            atom_features=atom_features,
-            goal_features=goal_features,
-            atom_mask=atom_mask,
-            frame_mask=frame_mask,
-        )
-        _, loss_metrics = stride_value_loss(
-            outputs,
-            StrideValueTargets(event=event, flux=flux),
-            config=loss_config,
-        )
+    batch_losses: list[dict[str, float]] = []
+    score_batches: list[np.ndarray] = []
+    label_batches: list[np.ndarray] = []
 
-    scores = outputs["p_event"].detach().cpu().numpy()
-    labels = event.detach().cpu().numpy()
+    with torch.no_grad():
+        for batch in loader:
+            coordinates, atom_features, atom_mask, frame_mask, goal_features, event, flux = [
+                tensor.to(device) for tensor in batch
+            ]
+            outputs = model(
+                coordinates=coordinates,
+                atom_features=atom_features,
+                goal_features=goal_features,
+                atom_mask=atom_mask,
+                frame_mask=frame_mask,
+            )
+            _, loss_metrics = stride_value_loss(
+                outputs,
+                StrideValueTargets(event=event, flux=flux),
+                config=loss_config,
+            )
+            batch_losses.append(loss_metrics)
+            score_batches.append(outputs["p_event"].detach().cpu().numpy())
+            label_batches.append(event.detach().cpu().numpy())
+
+    scores = np.concatenate(score_batches, axis=0)
+    labels = np.concatenate(label_batches, axis=0)
     binary_metrics = compute_binary_metrics(labels, scores)
     enrichment = top_k_enrichment(labels, scores, k=0.25)
 
+    loss_metrics = {
+        key: float(np.mean([batch[key] for batch in batch_losses]))
+        for key in batch_losses[0]
+    }
     metrics = {f"{prefix}{key}": value for key, value in loss_metrics.items()}
     metrics.update({f"{prefix}{key}": value for key, value in binary_metrics.items()})
     metrics[f"{prefix}top25_enrichment"] = float(enrichment)
