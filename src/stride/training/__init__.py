@@ -5,6 +5,7 @@ from stride.training.atomistic import (
     resolve_device,
     save_atomistic_checkpoint,
     score_atomistic_dataset,
+    split_atomistic_indices,
     train_atomistic_value_model,
 )
 from stride.training.evaluation import (
@@ -26,6 +27,7 @@ __all__ = [
     "resolve_device",
     "save_atomistic_checkpoint",
     "score_atomistic_dataset",
+    "split_atomistic_indices",
     "dihedral_window_baseline_scores",
     "evaluate_rankers",
     "random_baseline_scores",

@@ -7,7 +7,11 @@ import numpy as np
 
 from stride.data import load_atomistic_dataset_npz, load_pdb_trajectory
 from stride.goals import GoalSpec
-from stride.training import load_atomistic_checkpoint, score_atomistic_dataset
+from stride.training import (
+    load_atomistic_checkpoint,
+    score_atomistic_dataset,
+    split_atomistic_indices,
+)
 from stride.training.evaluation import (
     dihedral_window_baseline_scores,
     random_baseline_scores,
@@ -45,6 +49,30 @@ def main() -> None:
         "--rank-key",
         default="p_event",
         help="Checkpoint score key to treat as the primary STRIDE ranker.",
+    )
+    parser.add_argument(
+        "--eval-split",
+        choices=("all", "train", "validation"),
+        default="all",
+        help="Evaluate all examples or the train/validation subset from a split.",
+    )
+    parser.add_argument(
+        "--split-strategy",
+        choices=("contiguous", "random", "blocked", "blocked_tail"),
+        default="contiguous",
+        help="Split strategy used when --eval-split is train or validation.",
+    )
+    parser.add_argument(
+        "--validation-fraction",
+        type=float,
+        default=0.2,
+        help="Validation fraction used when --eval-split is train or validation.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=7,
+        help="Split seed used when --eval-split is train or validation.",
     )
     parser.add_argument(
         "--goal-yaml",
@@ -102,16 +130,33 @@ def main() -> None:
     baseline_info = _build_dihedral_baselines(dataset, args)
     rankers.update(baseline_info)
     rankers["random"] = random_baseline_scores(len(dataset.event_labels), seed=args.random_seed)
+    eval_indices = _evaluation_indices(dataset, args)
+    eval_labels = dataset.event_labels[eval_indices]
+    eval_rankers = {
+        name: np.asarray(scores)[eval_indices]
+        for name, scores in rankers.items()
+    }
+    dataset_name = str(args.dataset_npz)
+    if args.eval_split != "all":
+        dataset_name = (
+            f"{dataset_name} [{args.eval_split} split: "
+            f"{args.split_strategy}, validation_fraction={args.validation_fraction}, "
+            f"seed={args.seed}]"
+        )
 
     paths = write_evaluation_report(
         output_dir=args.output_dir,
-        y_true=dataset.event_labels,
-        rankers=rankers,
-        dataset_name=str(args.dataset_npz),
+        y_true=eval_labels,
+        rankers=eval_rankers,
+        dataset_name=dataset_name,
         checkpoint_name=str(args.checkpoint or args.scores_npz or ""),
     )
 
     print(f"Dataset: {args.dataset_npz}")
+    print(
+        "Evaluation examples: "
+        f"{len(eval_indices)} ({args.eval_split}, positive_rate={eval_labels.mean():.6g})"
+    )
     if args.checkpoint is not None:
         print(f"Checkpoint: {args.checkpoint}")
     if checkpoint_metrics:
@@ -158,6 +203,23 @@ def _build_dihedral_baselines(
             mode="last_frame",
         ),
     }
+
+
+def _evaluation_indices(dataset, args: argparse.Namespace) -> np.ndarray:
+    if args.eval_split == "all":
+        return np.arange(len(dataset.event_labels), dtype=np.int64)
+
+    train_indices, val_indices = split_atomistic_indices(
+        dataset=dataset,
+        validation_fraction=args.validation_fraction,
+        seed=args.seed,
+        split_strategy=args.split_strategy,
+    )
+    if args.eval_split == "train":
+        return train_indices.astype(np.int64)
+    if args.eval_split == "validation":
+        return val_indices.astype(np.int64)
+    raise ValueError(f"Unknown eval split: {args.eval_split}")
 
 
 def _parse_dihedral_indices(value: str | None) -> tuple[int, int, int, int] | None:

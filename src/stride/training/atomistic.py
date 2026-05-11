@@ -360,6 +360,38 @@ def describe_atomistic_split(
     Summarize train/validation event balance before training.
     """
     dataset.validate()
+    train_indices_np, val_indices_np = split_atomistic_indices(
+        dataset=dataset,
+        validation_fraction=validation_fraction,
+        seed=seed,
+        split_strategy=split_strategy,
+    )
+
+    train_labels = dataset.event_labels[train_indices_np]
+    val_labels = dataset.event_labels[val_indices_np] if len(val_indices_np) else np.array([])
+
+    return {
+        "num_examples": float(len(dataset.event_labels)),
+        "positive_rate": float(np.mean(dataset.event_labels)),
+        "train_examples": float(len(train_indices_np)),
+        "train_positive_rate": float(np.mean(train_labels)) if len(train_labels) else float("nan"),
+        "train_positives": float(np.sum(train_labels >= 0.5)),
+        "val_examples": float(len(val_indices_np)),
+        "val_positive_rate": float(np.mean(val_labels)) if len(val_labels) else float("nan"),
+        "val_positives": float(np.sum(val_labels >= 0.5)) if len(val_labels) else 0.0,
+    }
+
+
+def split_atomistic_indices(
+    dataset: AtomisticDataset,
+    validation_fraction: float = 0.2,
+    seed: int = 7,
+    split_strategy: str = "contiguous",
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return train and validation indices using the same split logic as training.
+    """
+    dataset.validate()
     train_indices, val_indices = _split_indices(
         num_examples=len(dataset.event_labels),
         validation_fraction=validation_fraction,
@@ -368,20 +400,7 @@ def describe_atomistic_split(
         source_frame_start=dataset.source_frame_start,
         window_size=dataset.coordinates.shape[1],
     )
-
-    train_labels = dataset.event_labels[train_indices.numpy()]
-    val_labels = dataset.event_labels[val_indices.numpy()] if len(val_indices) else np.array([])
-
-    return {
-        "num_examples": float(len(dataset.event_labels)),
-        "positive_rate": float(np.mean(dataset.event_labels)),
-        "train_examples": float(len(train_indices)),
-        "train_positive_rate": float(np.mean(train_labels)) if len(train_labels) else float("nan"),
-        "train_positives": float(np.sum(train_labels >= 0.5)),
-        "val_examples": float(len(val_indices)),
-        "val_positive_rate": float(np.mean(val_labels)) if len(val_labels) else float("nan"),
-        "val_positives": float(np.sum(val_labels >= 0.5)) if len(val_labels) else 0.0,
-    }
+    return train_indices.numpy(), val_indices.numpy()
 
 
 def _make_loaders(

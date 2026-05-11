@@ -17,6 +17,7 @@ from stride.training import (
     load_atomistic_checkpoint,
     save_atomistic_checkpoint,
     score_atomistic_dataset,
+    split_atomistic_indices,
     train_atomistic_value_model,
 )
 from stride.models import StrideModelConfig
@@ -197,6 +198,22 @@ def test_blocked_split_avoids_overlapping_windows() -> None:
     assert source_frame_start[tail_val_indices.numpy()].min() > source_frame_start[
         tail_train_indices.numpy()
     ].max()
+
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+    train_np, val_np = split_atomistic_indices(
+        dataset,
+        validation_fraction=0.25,
+        seed=5,
+        split_strategy="blocked_tail",
+    )
+    assert train_np.dtype == np.int64
+    assert val_np.dtype == np.int64
+    assert len(train_np) > 0
+    assert len(val_np) > 0
 
 
 def test_validation_evaluation_uses_batches() -> None:
