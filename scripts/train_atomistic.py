@@ -22,9 +22,12 @@ def main() -> None:
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument(
         "--split-strategy",
-        choices=("contiguous", "random"),
+        choices=("contiguous", "random", "blocked", "blocked_tail"),
         default="contiguous",
-        help="Use contiguous validation windows by default to reduce trajectory leakage.",
+        help=(
+            "Train/validation split. Use blocked or blocked_tail for purged "
+            "trajectory chunk evaluation."
+        ),
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--hidden-dim", type=int, default=128)
@@ -71,6 +74,24 @@ def main() -> None:
         choices=("max", "min"),
         default="max",
         help="Whether higher or lower save-best metric values are better.",
+    )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=None,
+        help="Stop after this many epochs without improving the save-best metric.",
+    )
+    parser.add_argument(
+        "--early-stopping-min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum save-best metric improvement required to reset patience.",
+    )
+    parser.add_argument(
+        "--lr-scheduler",
+        choices=("none", "cosine", "plateau"),
+        default="none",
+        help="Optional learning-rate scheduler.",
     )
     args = parser.parse_args()
 
@@ -130,6 +151,9 @@ def main() -> None:
         "device": args.device,
         "event_positive_weight": args.event_positive_weight,
         "best_checkpoint": str(best_checkpoint) if best_checkpoint is not None else None,
+        "early_stopping_patience": args.early_stopping_patience,
+        "early_stopping_min_delta": args.early_stopping_min_delta,
+        "lr_scheduler": args.lr_scheduler,
     }
     model, metrics = train_atomistic_value_model(
         dataset=dataset,
@@ -149,6 +173,9 @@ def main() -> None:
         save_best_metric=args.save_best_metric,
         save_best_mode=args.save_best_mode,
         resume_from=args.resume_from,
+        early_stopping_patience=args.early_stopping_patience,
+        early_stopping_min_delta=args.early_stopping_min_delta,
+        lr_scheduler=args.lr_scheduler,
     )
 
     print(f"Final checkpoint: {args.checkpoint}")
@@ -164,7 +191,13 @@ def _print_epoch_progress(epoch: int, total_epochs: int, metrics: dict[str, floa
         f"train_loss={metrics.get('train_loss', float('nan')):.6g}",
         f"event_positive_weight={metrics.get('event_positive_weight', float('nan')):.6g}",
     ]
-    for key in ("val_loss", "val_auroc", "val_auprc", "val_top25_enrichment"):
+    for key in (
+        "val_loss",
+        "val_auroc",
+        "val_auprc",
+        "val_top25_enrichment",
+        "learning_rate",
+    ):
         if key in metrics:
             fields.append(f"{key}={metrics[key]:.6g}")
     print(" | ".join(fields), flush=True)

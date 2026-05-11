@@ -6,6 +6,11 @@ from torch.utils.data import DataLoader
 
 from stride.data import build_sample_ligand_contact_dataset
 from stride.training.atomistic import _evaluate_model, _to_tensor_dataset
+from stride.training.atomistic import _split_indices
+from stride.training.evaluation import (
+    dihedral_window_baseline_scores,
+    write_evaluation_report,
+)
 from stride.training.stride_value import StrideValueLossConfig
 from stride.training import (
     describe_atomistic_split,
@@ -160,6 +165,40 @@ def test_describe_atomistic_split_reports_positive_rates() -> None:
     assert 0.0 <= stats["positive_rate"] <= 1.0
 
 
+def test_blocked_split_avoids_overlapping_windows() -> None:
+    source_frame_start = np.arange(30, dtype=np.int64)
+    train_indices, val_indices = _split_indices(
+        num_examples=30,
+        validation_fraction=0.2,
+        seed=5,
+        split_strategy="blocked",
+        source_frame_start=source_frame_start,
+        window_size=4,
+    )
+
+    assert len(train_indices) > 0
+    assert len(val_indices) > 0
+    for train_index in train_indices.numpy():
+        train_start = source_frame_start[train_index]
+        train_end = train_start + 4
+        for val_index in val_indices.numpy():
+            val_start = source_frame_start[val_index]
+            val_end = val_start + 4
+            assert train_end <= val_start or val_end <= train_start
+
+    tail_train_indices, tail_val_indices = _split_indices(
+        num_examples=30,
+        validation_fraction=0.2,
+        seed=5,
+        split_strategy="blocked_tail",
+        source_frame_start=source_frame_start,
+        window_size=4,
+    )
+    assert source_frame_start[tail_val_indices.numpy()].min() > source_frame_start[
+        tail_train_indices.numpy()
+    ].max()
+
+
 def test_validation_evaluation_uses_batches() -> None:
     dataset = build_sample_ligand_contact_dataset(
         window_size=4,
@@ -196,3 +235,120 @@ def test_validation_evaluation_uses_batches() -> None:
 
     assert "val_loss" in metrics
     assert "val_auroc" in metrics
+
+
+def test_dihedral_baseline_scores_one_value_per_example() -> None:
+    coordinates = np.zeros((8, 4, 3), dtype=np.float32)
+    base = np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    target = base.copy()
+    target[3] = np.asarray([1.0, 1.0, 0.0], dtype=np.float32)
+    coordinates[:5] = base
+    coordinates[5:] = target
+
+    from stride.data import AtomRecord, build_atomistic_windows
+    from stride.goals import GoalSpec
+
+    atoms = [
+        AtomRecord(atom_name="A", element="C", residue_name="ALA", residue_id=1),
+        AtomRecord(atom_name="B", element="C", residue_name="ALA", residue_id=1),
+        AtomRecord(atom_name="C", element="C", residue_name="ALA", residue_id=1),
+        AtomRecord(atom_name="D", element="C", residue_name="ALA", residue_id=1),
+    ]
+    dataset = build_atomistic_windows(
+        coordinates=coordinates,
+        atoms=atoms,
+        goal=GoalSpec(
+            name="toy_dihedral",
+            type="dihedral_window",
+            selections=("atom:A", "atom:B", "atom:C", "atom:D"),
+            operator="inside",
+            threshold=0.0,
+            lower_bound=-10.0,
+            upper_bound=10.0,
+            horizon_iterations=2,
+        ),
+        window_size=3,
+        horizon=2,
+    )
+
+    scores = dihedral_window_baseline_scores(
+        dataset,
+        atom_indices=(0, 1, 2, 3),
+        lower_bound=-10.0,
+        upper_bound=10.0,
+    )
+
+    assert scores.shape == dataset.event_labels.shape
+    assert np.isfinite(scores).all()
+
+
+def test_evaluation_report_handles_rare_positives(tmp_path) -> None:
+    y_true = np.asarray([0, 0, 0, 0, 1], dtype=np.float32)
+    rankers = {
+        "STRIDE": np.asarray([0.1, 0.2, 0.3, 0.4, 0.9], dtype=np.float32),
+        "random": np.asarray([0.5, 0.1, 0.8, 0.2, 0.4], dtype=np.float32),
+    }
+
+    paths = write_evaluation_report(tmp_path, y_true=y_true, rankers=rankers)
+
+    assert paths["metrics"].exists()
+    assert paths["summary"].exists()
+    assert paths["quantiles"].exists()
+    assert "STRIDE" in paths["markdown"].read_text()
+
+
+def test_early_stopping_preserves_manual_best_checkpoint_selection(tmp_path) -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+    config = StrideModelConfig(
+        atom_feature_dim=dataset.atom_features.shape[-1],
+        goal_feature_dim=dataset.goal_features.shape[-1],
+        hidden_dim=16,
+        egnn_layers=1,
+        transformer_layers=1,
+        transformer_heads=4,
+        dropout=0.0,
+    )
+    manual_best = tmp_path / "manual_best.pt"
+    early_best = tmp_path / "early_best.pt"
+
+    _, manual_metrics = train_atomistic_value_model(
+        dataset=dataset,
+        config=config,
+        epochs=2,
+        batch_size=4,
+        validation_fraction=0.25,
+        seed=19,
+        device="cpu",
+        best_checkpoint_path=manual_best,
+        save_best_metric="val_loss",
+        save_best_mode="min",
+    )
+    _, early_metrics = train_atomistic_value_model(
+        dataset=dataset,
+        config=config,
+        epochs=2,
+        batch_size=4,
+        validation_fraction=0.25,
+        seed=19,
+        device="cpu",
+        best_checkpoint_path=early_best,
+        save_best_metric="val_loss",
+        save_best_mode="min",
+        early_stopping_patience=10,
+    )
+
+    assert manual_best.exists()
+    assert early_best.exists()
+    assert manual_metrics["best_metric_value"] == early_metrics["best_metric_value"]

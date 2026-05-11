@@ -36,6 +36,9 @@ def train_atomistic_value_model(
     save_best_metric: str = "val_auroc",
     save_best_mode: str = "max",
     resume_from: str | Path | None = None,
+    early_stopping_patience: int | None = None,
+    early_stopping_min_delta: float = 0.0,
+    lr_scheduler: str | None = None,
 ) -> tuple[StrideValueModel, dict[str, float]]:
     """
     Train STRIDE's goal-conditioned value model on an AtomisticDataset.
@@ -58,14 +61,18 @@ def train_atomistic_value_model(
 
     model = StrideValueModel(config).to(device_obj)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    scheduler = _make_scheduler(optimizer, lr_scheduler, epochs, save_best_mode)
     start_epoch = 1
     best_metric_value: float | None = None
+    epochs_without_improvement = 0
 
     if resume_from is not None:
         checkpoint = torch.load(resume_from, map_location=device_obj)
         model.load_state_dict(checkpoint["model_state_dict"])
         if "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if scheduler is not None and "scheduler_state_dict" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         previous_epoch = int(checkpoint.get("epoch", checkpoint.get("metrics", {}).get("epoch", 0)))
         start_epoch = previous_epoch + 1
         best_metric_value = _metadata_float(
@@ -87,6 +94,10 @@ def train_atomistic_value_model(
     metrics: dict[str, float] = {}
 
     _validate_best_mode(save_best_mode)
+    if early_stopping_patience is not None and early_stopping_patience < 0:
+        raise ValueError("early_stopping_patience must be non-negative.")
+    if early_stopping_min_delta < 0.0:
+        raise ValueError("early_stopping_min_delta must be non-negative.")
 
     for epoch in range(start_epoch, epochs + 1):
         model.train()
@@ -126,11 +137,18 @@ def train_atomistic_value_model(
             )
         metrics["event_positive_weight"] = float(loss_config.event_positive_weight)
         metrics["start_epoch"] = float(start_epoch)
+        metrics["learning_rate"] = float(optimizer.param_groups[0]["lr"])
 
         metric_value = metrics.get(save_best_metric)
-        is_best = _is_better_metric(metric_value, best_metric_value, save_best_mode)
+        is_best = _is_better_metric(
+            metric_value,
+            best_metric_value,
+            save_best_mode,
+            min_delta=early_stopping_min_delta,
+        )
         if is_best:
             best_metric_value = float(metric_value)
+            epochs_without_improvement = 0
             metrics["best_metric_value"] = best_metric_value
             metrics["best_metric_epoch"] = float(epoch)
             if best_checkpoint_path is not None:
@@ -147,13 +165,26 @@ def train_atomistic_value_model(
                         "best_metric_epoch": epoch,
                     },
                     optimizer=optimizer,
+                    scheduler=scheduler,
                     epoch=epoch,
                 )
         elif best_metric_value is not None:
+            epochs_without_improvement += 1
             metrics["best_metric_value"] = best_metric_value
+
+        _step_scheduler(scheduler, lr_scheduler, metric_value)
+        metrics["learning_rate"] = float(optimizer.param_groups[0]["lr"])
+        metrics["epochs_without_improvement"] = float(epochs_without_improvement)
 
         if progress_callback is not None:
             progress_callback(epoch, epochs, dict(metrics))
+
+        if (
+            early_stopping_patience is not None
+            and epochs_without_improvement >= early_stopping_patience
+        ):
+            metrics["early_stopped"] = 1.0
+            break
 
     if checkpoint_path is not None:
         save_atomistic_checkpoint(
@@ -166,8 +197,12 @@ def train_atomistic_value_model(
                 "best_metric": save_best_metric,
                 "best_metric_mode": save_best_mode,
                 "best_metric_value": best_metric_value,
+                "early_stopping_patience": early_stopping_patience,
+                "early_stopping_min_delta": early_stopping_min_delta,
+                "lr_scheduler": lr_scheduler or "none",
             },
             optimizer=optimizer,
+            scheduler=scheduler,
             epoch=int(metrics.get("epoch", 0)),
         )
 
@@ -221,6 +256,7 @@ def save_atomistic_checkpoint(
     metrics: dict[str, float] | None = None,
     metadata: dict[str, object] | None = None,
     optimizer: torch.optim.Optimizer | None = None,
+    scheduler: object | None = None,
     epoch: int | None = None,
 ) -> None:
     path = Path(path)
@@ -233,6 +269,8 @@ def save_atomistic_checkpoint(
     }
     if optimizer is not None:
         checkpoint["optimizer_state_dict"] = optimizer.state_dict()
+    if scheduler is not None:
+        checkpoint["scheduler_state_dict"] = scheduler.state_dict()
     if epoch is not None:
         checkpoint["epoch"] = int(epoch)
     torch.save(checkpoint, path)
@@ -327,6 +365,8 @@ def describe_atomistic_split(
         validation_fraction=validation_fraction,
         seed=seed,
         split_strategy=split_strategy,
+        source_frame_start=dataset.source_frame_start,
+        window_size=dataset.coordinates.shape[1],
     )
 
     train_labels = dataset.event_labels[train_indices.numpy()]
@@ -357,6 +397,8 @@ def _make_loaders(
         validation_fraction=validation_fraction,
         seed=seed,
         split_strategy=split_strategy,
+        source_frame_start=dataset.source_frame_start,
+        window_size=dataset.coordinates.shape[1],
     )
 
     train_subset = torch.utils.data.Subset(tensor_dataset, train_indices.tolist())
@@ -375,6 +417,8 @@ def _split_indices(
     validation_fraction: float,
     seed: int,
     split_strategy: str,
+    source_frame_start: np.ndarray | None = None,
+    window_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     val_count = int(round(num_examples * validation_fraction))
     if num_examples < 3:
@@ -391,10 +435,86 @@ def _split_indices(
         split_at = num_examples - val_count
         train_indices = torch.arange(0, split_at)
         val_indices = torch.arange(split_at, num_examples)
+    elif split_strategy == "blocked":
+        train_indices, val_indices = _blocked_split_indices(
+            num_examples=num_examples,
+            val_count=val_count,
+            seed=seed,
+            source_frame_start=source_frame_start,
+            window_size=window_size,
+        )
+    elif split_strategy == "blocked_tail":
+        train_indices, val_indices = _blocked_split_indices(
+            num_examples=num_examples,
+            val_count=val_count,
+            seed=seed,
+            source_frame_start=source_frame_start,
+            window_size=window_size,
+            block_start="tail",
+        )
     else:
-        raise ValueError("split_strategy must be 'contiguous' or 'random'.")
+        raise ValueError(
+            "split_strategy must be 'contiguous', 'random', 'blocked', "
+            "or 'blocked_tail'."
+        )
 
     return train_indices, val_indices
+
+
+def _blocked_split_indices(
+    num_examples: int,
+    val_count: int,
+    seed: int,
+    source_frame_start: np.ndarray | None,
+    window_size: int | None,
+    block_start: int | str | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if val_count == 0:
+        return torch.arange(num_examples), torch.empty(0, dtype=torch.long)
+    if source_frame_start is None:
+        source_frame_start = np.arange(num_examples, dtype=np.int64)
+    starts = np.asarray(source_frame_start, dtype=np.int64)
+    if starts.shape != (num_examples,):
+        raise ValueError("source_frame_start must have one value per example.")
+    if window_size is None or window_size <= 0:
+        window_size = 1
+
+    ordered = np.argsort(starts, kind="mergesort")
+    max_block_start = num_examples - val_count
+    if block_start == "tail":
+        resolved_block_start = max_block_start
+    elif block_start is None:
+        rng = np.random.default_rng(seed)
+        resolved_block_start = int(rng.integers(0, max_block_start + 1))
+    else:
+        resolved_block_start = int(block_start)
+    if resolved_block_start < 0 or resolved_block_start > max_block_start:
+        raise ValueError("blocked split start is out of range.")
+    val_indices_np = np.sort(
+        ordered[resolved_block_start : resolved_block_start + val_count]
+    )
+
+    val_starts = starts[val_indices_np]
+    val_interval_start = int(np.min(val_starts))
+    val_interval_end = int(np.max(val_starts) + window_size)
+    train_mask = np.ones(num_examples, dtype=bool)
+    train_mask[val_indices_np] = False
+    train_intervals_overlap = (
+        (starts < val_interval_end) & ((starts + int(window_size)) > val_interval_start)
+    )
+    train_mask[train_intervals_overlap] = False
+    train_indices_np = np.flatnonzero(train_mask)
+
+    if train_indices_np.size == 0:
+        raise ValueError(
+            "Blocked split removed all training examples; reduce validation_fraction "
+            "or use a longer trajectory."
+        )
+
+    return (
+        torch.tensor(train_indices_np, dtype=torch.long),
+        torch.tensor(val_indices_np, dtype=torch.long),
+    )
 
 
 def _to_tensor_dataset(dataset: AtomisticDataset) -> TensorDataset:
@@ -461,15 +581,16 @@ def _is_better_metric(
     metric_value: float | None,
     best_metric_value: float | None,
     mode: str,
+    min_delta: float = 0.0,
 ) -> bool:
     if metric_value is None or not np.isfinite(metric_value):
         return False
     if best_metric_value is None or not np.isfinite(best_metric_value):
         return True
     if mode == "max":
-        return metric_value > best_metric_value
+        return metric_value > best_metric_value + min_delta
     if mode == "min":
-        return metric_value < best_metric_value
+        return metric_value < best_metric_value - min_delta
     raise ValueError("mode must be 'max' or 'min'.")
 
 
@@ -485,3 +606,42 @@ def _metadata_float(metadata: object, key: str) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _make_scheduler(
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler: str | None,
+    epochs: int,
+    metric_mode: str,
+) -> object | None:
+    value = (lr_scheduler or "none").lower()
+    if value == "none":
+        return None
+    if value == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, epochs),
+        )
+    if value == "plateau":
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode=metric_mode,
+            factor=0.5,
+            patience=2,
+        )
+    raise ValueError("lr_scheduler must be one of: none, cosine, plateau.")
+
+
+def _step_scheduler(
+    scheduler: object | None,
+    lr_scheduler: str | None,
+    metric_value: float | None,
+) -> None:
+    if scheduler is None:
+        return
+    value = (lr_scheduler or "none").lower()
+    if value == "plateau":
+        if metric_value is not None and np.isfinite(metric_value):
+            scheduler.step(float(metric_value))
+    else:
+        scheduler.step()

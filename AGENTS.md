@@ -66,9 +66,20 @@ Current repository foundation:
   - `scripts/download_mdshare_dataset.py`
   - `scripts/train_atomistic.py`
   - `scripts/score_atomistic.py`
+  - `scripts/evaluate_atomistic.py`
 - Atomistic tests that pass a small protein-ligand contact dataset through the
   existing eGNN + Temporal Transformer value model.
 - PDB conversion, dihedral labeling, and atomistic checkpoint tests.
+- Evaluation utilities for checkpoint/score reports:
+  - Score distribution summaries.
+  - AUROC, AUPRC, top-k enrichment at 1%, 5%, 10%, and 25%.
+  - Precision/recall at score quantiles.
+  - Random and dihedral phi-window baselines.
+  - Markdown, CSV, and plot outputs under `outputs/reports/`.
+- Training controls for more rigorous validation:
+  - Random, contiguous, blocked, and blocked-tail trajectory splits.
+  - Early stopping on the selected best-checkpoint metric.
+  - Optional cosine and plateau learning-rate schedulers.
 
 Recent deep learning architecture additions:
 
@@ -148,7 +159,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-16 passed
+25 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -171,6 +182,19 @@ Training CLI notes:
   --save-best-mode max`.
 - Resume training with `--resume-from CHECKPOINT`; `--epochs` is interpreted as
   the desired final epoch number, not additional epochs.
+- Use `--split-strategy blocked` for a purged random held-out trajectory block
+  and `--split-strategy blocked_tail` for a purged tail chunk. Keep
+  `--split-strategy random` as a fast diagnostic, not final evidence.
+- Early stopping is available with `--early-stopping-patience`; it monitors the
+  same metric configured by `--save-best-metric`.
+- Optional scheduler choices are `--lr-scheduler cosine` and
+  `--lr-scheduler plateau`.
+
+Evaluation report example:
+
+```bash
+conda run -n stride python scripts/evaluate_atomistic.py outputs/alanine_phi_stride_rare.npz --checkpoint outputs/alanine_phi_gpu_w2_lr1e4.best.pt --goal-yaml configs/goals/alanine_phi_window.yaml --topology-pdb outputs/mdshare/alanine_dipeptide/alanine-dipeptide-nowater.pdb --output-dir outputs/reports/alanine_phi_gpu_w2_lr1e4
+```
 
 First real dataset workflow:
 

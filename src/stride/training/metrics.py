@@ -130,6 +130,53 @@ def top_k_positive_rate(
     return float(np.mean(y_true[top_indices]))
 
 
+def precision_recall_at_score_quantiles(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    quantiles: tuple[float, ...] = (0.75, 0.9, 0.95, 0.99),
+) -> list[dict[str, float]]:
+    """
+    Compute precision/recall after selecting examples above score quantiles.
+
+    This is more useful for rare-event ranking than a fixed 0.5 threshold,
+    because model calibration often lags ranking quality early in development.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    y_score = np.asarray(y_score).astype(float)
+
+    if y_true.shape != y_score.shape:
+        raise ValueError(
+            f"Shape mismatch: y_true has {y_true.shape}, y_score has {y_score.shape}"
+        )
+
+    positives = int(np.sum(y_true >= 1))
+    rows: list[dict[str, float]] = []
+    for quantile in quantiles:
+        if not 0.0 <= quantile < 1.0:
+            raise ValueError(f"quantiles must be in [0, 1), got {quantile}")
+        threshold = float(np.quantile(y_score, quantile))
+        selected = y_score >= threshold
+        selected_count = int(np.sum(selected))
+        true_positive_count = int(np.sum(y_true[selected] >= 1))
+        precision = (
+            true_positive_count / selected_count if selected_count > 0 else float("nan")
+        )
+        recall = true_positive_count / positives if positives > 0 else float("nan")
+        rows.append(
+            {
+                "quantile": float(quantile),
+                "threshold": threshold,
+                "selected": float(selected_count),
+                "selected_fraction": float(np.mean(selected)),
+                "true_positives": float(true_positive_count),
+                "precision": float(precision),
+                "recall": float(recall),
+            }
+        )
+
+    return rows
+
+
 if __name__ == "__main__":
     y_true = np.array([0, 0, 1, 1, 0, 1])
     y_score = np.array([0.1, 0.2, 0.9, 0.8, 0.4, 0.7])
