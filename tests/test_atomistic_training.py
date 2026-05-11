@@ -8,6 +8,7 @@ from stride.data import build_sample_ligand_contact_dataset
 from stride.training.atomistic import _evaluate_model, _to_tensor_dataset
 from stride.training.stride_value import StrideValueLossConfig
 from stride.training import (
+    describe_atomistic_split,
     load_atomistic_checkpoint,
     save_atomistic_checkpoint,
     score_atomistic_dataset,
@@ -87,6 +88,76 @@ def test_atomistic_training_checkpoint_and_scoring(tmp_path) -> None:
     assert scores["p_event"].shape == dataset.event_labels.shape
     assert scores["stride_score"].shape == dataset.event_labels.shape
     assert np.isfinite(scores["p_event"]).all()
+
+
+def test_atomistic_training_saves_best_checkpoint_and_resume(tmp_path) -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+    config = StrideModelConfig(
+        atom_feature_dim=dataset.atom_features.shape[-1],
+        goal_feature_dim=dataset.goal_features.shape[-1],
+        hidden_dim=16,
+        egnn_layers=1,
+        transformer_layers=1,
+        transformer_heads=4,
+        dropout=0.0,
+    )
+    final_checkpoint = tmp_path / "final.pt"
+    best_checkpoint = tmp_path / "best.pt"
+
+    _, metrics = train_atomistic_value_model(
+        dataset=dataset,
+        config=config,
+        epochs=1,
+        batch_size=4,
+        validation_fraction=0.25,
+        seed=13,
+        device="cpu",
+        checkpoint_path=final_checkpoint,
+        best_checkpoint_path=best_checkpoint,
+        save_best_metric="val_loss",
+        save_best_mode="min",
+    )
+
+    assert final_checkpoint.exists()
+    assert best_checkpoint.exists()
+    assert metrics["best_metric_value"] == metrics["val_loss"]
+
+    _, resumed_metrics = train_atomistic_value_model(
+        dataset=dataset,
+        config=config,
+        epochs=2,
+        batch_size=4,
+        validation_fraction=0.25,
+        seed=13,
+        device="cpu",
+        resume_from=final_checkpoint,
+    )
+
+    assert resumed_metrics["start_epoch"] == 2.0
+    assert resumed_metrics["epoch"] == 2.0
+
+
+def test_describe_atomistic_split_reports_positive_rates() -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+    stats = describe_atomistic_split(
+        dataset,
+        validation_fraction=0.25,
+        seed=3,
+        split_strategy="random",
+    )
+
+    assert stats["num_examples"] == len(dataset.event_labels)
+    assert stats["train_examples"] > 0
+    assert stats["val_examples"] > 0
+    assert 0.0 <= stats["positive_rate"] <= 1.0
 
 
 def test_validation_evaluation_uses_batches() -> None:

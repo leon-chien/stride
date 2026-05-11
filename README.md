@@ -351,6 +351,26 @@ Use a remote GPU for longer runs after this one-epoch workflow succeeds.
 For rare-event labels, keep `--event-positive-weight auto` unless you have a
 reason to set the class weight manually.
 
+Training prints split positive rates before the first epoch and one progress
+line after every epoch. It also saves a separate best checkpoint by validation
+AUROC by default:
+
+```text
+outputs/alanine_phi_stride.best.pt
+```
+
+Resume a stopped run by passing the final or best checkpoint and the desired
+total epoch count:
+
+```bash
+python scripts/train_atomistic.py \
+  outputs/alanine_phi_stride.npz \
+  outputs/alanine_phi_stride.pt \
+  --resume-from outputs/alanine_phi_stride.pt \
+  --epochs 50 \
+  --device cuda
+```
+
 ## Example Workflows
 
 Inspect a WESTPA HDF5 file:

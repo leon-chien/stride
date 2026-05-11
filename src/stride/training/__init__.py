@@ -1,4 +1,5 @@
 from stride.training.atomistic import (
+    describe_atomistic_split,
     load_atomistic_checkpoint,
     load_dataset_and_make_config,
     resolve_device,
@@ -14,6 +15,7 @@ from stride.training.stride_value import (
 
 __all__ = [
     "load_atomistic_checkpoint",
+    "describe_atomistic_split",
     "load_dataset_and_make_config",
     "resolve_device",
     "save_atomistic_checkpoint",

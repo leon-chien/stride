@@ -30,6 +30,12 @@ def train_atomistic_value_model(
     split_strategy: str = "contiguous",
     event_positive_weight: float | str = "auto",
     progress_callback: Callable[[int, int, dict[str, float]], None] | None = None,
+    checkpoint_path: str | Path | None = None,
+    checkpoint_metadata: dict[str, object] | None = None,
+    best_checkpoint_path: str | Path | None = None,
+    save_best_metric: str = "val_auroc",
+    save_best_mode: str = "max",
+    resume_from: str | Path | None = None,
 ) -> tuple[StrideValueModel, dict[str, float]]:
     """
     Train STRIDE's goal-conditioned value model on an AtomisticDataset.
@@ -52,6 +58,26 @@ def train_atomistic_value_model(
 
     model = StrideValueModel(config).to(device_obj)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    start_epoch = 1
+    best_metric_value: float | None = None
+
+    if resume_from is not None:
+        checkpoint = torch.load(resume_from, map_location=device_obj)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        if "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        previous_epoch = int(checkpoint.get("epoch", checkpoint.get("metrics", {}).get("epoch", 0)))
+        start_epoch = previous_epoch + 1
+        best_metric_value = _metadata_float(
+            checkpoint.get("metadata", {}),
+            "best_metric_value",
+        )
+        if start_epoch > epochs:
+            raise ValueError(
+                f"Resume checkpoint is already at epoch {previous_epoch}, "
+                f"but requested epochs={epochs}."
+            )
+
     loss_config = StrideValueLossConfig(
         event_positive_weight=_resolve_event_positive_weight(
             dataset.event_labels,
@@ -60,7 +86,9 @@ def train_atomistic_value_model(
     )
     metrics: dict[str, float] = {}
 
-    for epoch in range(1, epochs + 1):
+    _validate_best_mode(save_best_mode)
+
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         epoch_losses: list[float] = []
 
@@ -97,8 +125,51 @@ def train_atomistic_value_model(
                 )
             )
         metrics["event_positive_weight"] = float(loss_config.event_positive_weight)
+        metrics["start_epoch"] = float(start_epoch)
+
+        metric_value = metrics.get(save_best_metric)
+        is_best = _is_better_metric(metric_value, best_metric_value, save_best_mode)
+        if is_best:
+            best_metric_value = float(metric_value)
+            metrics["best_metric_value"] = best_metric_value
+            metrics["best_metric_epoch"] = float(epoch)
+            if best_checkpoint_path is not None:
+                save_atomistic_checkpoint(
+                    best_checkpoint_path,
+                    model,
+                    metrics,
+                    metadata={
+                        **(checkpoint_metadata or {}),
+                        "checkpoint_type": "best",
+                        "best_metric": save_best_metric,
+                        "best_metric_mode": save_best_mode,
+                        "best_metric_value": best_metric_value,
+                        "best_metric_epoch": epoch,
+                    },
+                    optimizer=optimizer,
+                    epoch=epoch,
+                )
+        elif best_metric_value is not None:
+            metrics["best_metric_value"] = best_metric_value
+
         if progress_callback is not None:
             progress_callback(epoch, epochs, dict(metrics))
+
+    if checkpoint_path is not None:
+        save_atomistic_checkpoint(
+            checkpoint_path,
+            model,
+            metrics,
+            metadata={
+                **(checkpoint_metadata or {}),
+                "checkpoint_type": "final",
+                "best_metric": save_best_metric,
+                "best_metric_mode": save_best_mode,
+                "best_metric_value": best_metric_value,
+            },
+            optimizer=optimizer,
+            epoch=int(metrics.get("epoch", 0)),
+        )
 
     return model, metrics
 
@@ -149,18 +220,22 @@ def save_atomistic_checkpoint(
     model: StrideValueModel,
     metrics: dict[str, float] | None = None,
     metadata: dict[str, object] | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    epoch: int | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "config": asdict(model.config),
-            "metrics": metrics or {},
-            "metadata": metadata or {},
-        },
-        path,
-    )
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "config": asdict(model.config),
+        "metrics": metrics or {},
+        "metadata": metadata or {},
+    }
+    if optimizer is not None:
+        checkpoint["optimizer_state_dict"] = optimizer.state_dict()
+    if epoch is not None:
+        checkpoint["epoch"] = int(epoch)
+    torch.save(checkpoint, path)
 
 
 def load_atomistic_checkpoint(
@@ -237,6 +312,38 @@ def load_dataset_and_make_config(
     return dataset, config
 
 
+def describe_atomistic_split(
+    dataset: AtomisticDataset,
+    validation_fraction: float = 0.2,
+    seed: int = 7,
+    split_strategy: str = "contiguous",
+) -> dict[str, float]:
+    """
+    Summarize train/validation event balance before training.
+    """
+    dataset.validate()
+    train_indices, val_indices = _split_indices(
+        num_examples=len(dataset.event_labels),
+        validation_fraction=validation_fraction,
+        seed=seed,
+        split_strategy=split_strategy,
+    )
+
+    train_labels = dataset.event_labels[train_indices.numpy()]
+    val_labels = dataset.event_labels[val_indices.numpy()] if len(val_indices) else np.array([])
+
+    return {
+        "num_examples": float(len(dataset.event_labels)),
+        "positive_rate": float(np.mean(dataset.event_labels)),
+        "train_examples": float(len(train_indices)),
+        "train_positive_rate": float(np.mean(train_labels)) if len(train_labels) else float("nan"),
+        "train_positives": float(np.sum(train_labels >= 0.5)),
+        "val_examples": float(len(val_indices)),
+        "val_positive_rate": float(np.mean(val_labels)) if len(val_labels) else float("nan"),
+        "val_positives": float(np.sum(val_labels >= 0.5)) if len(val_labels) else 0.0,
+    }
+
+
 def _make_loaders(
     dataset: AtomisticDataset,
     batch_size: int,
@@ -245,7 +352,30 @@ def _make_loaders(
     split_strategy: str,
 ) -> tuple[DataLoader, DataLoader | None]:
     tensor_dataset = _to_tensor_dataset(dataset)
-    num_examples = len(tensor_dataset)
+    train_indices, val_indices = _split_indices(
+        num_examples=len(tensor_dataset),
+        validation_fraction=validation_fraction,
+        seed=seed,
+        split_strategy=split_strategy,
+    )
+
+    train_subset = torch.utils.data.Subset(tensor_dataset, train_indices.tolist())
+    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+
+    val_loader = None
+    if len(val_indices) > 0:
+        val_subset = torch.utils.data.Subset(tensor_dataset, val_indices.tolist())
+        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader
+
+
+def _split_indices(
+    num_examples: int,
+    validation_fraction: float,
+    seed: int,
+    split_strategy: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
     val_count = int(round(num_examples * validation_fraction))
     if num_examples < 3:
         val_count = 0
@@ -264,15 +394,7 @@ def _make_loaders(
     else:
         raise ValueError("split_strategy must be 'contiguous' or 'random'.")
 
-    train_subset = torch.utils.data.Subset(tensor_dataset, train_indices.tolist())
-    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
-
-    val_loader = None
-    if val_count > 0:
-        val_subset = torch.utils.data.Subset(tensor_dataset, val_indices.tolist())
-        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
-
-    return train_loader, val_loader
+    return train_indices, val_indices
 
 
 def _to_tensor_dataset(dataset: AtomisticDataset) -> TensorDataset:
@@ -333,3 +455,33 @@ def _evaluate_model(
     metrics.update({f"{prefix}{key}": value for key, value in binary_metrics.items()})
     metrics[f"{prefix}top25_enrichment"] = float(enrichment)
     return metrics
+
+
+def _is_better_metric(
+    metric_value: float | None,
+    best_metric_value: float | None,
+    mode: str,
+) -> bool:
+    if metric_value is None or not np.isfinite(metric_value):
+        return False
+    if best_metric_value is None or not np.isfinite(best_metric_value):
+        return True
+    if mode == "max":
+        return metric_value > best_metric_value
+    if mode == "min":
+        return metric_value < best_metric_value
+    raise ValueError("mode must be 'max' or 'min'.")
+
+
+def _validate_best_mode(mode: str) -> None:
+    if mode not in {"max", "min"}:
+        raise ValueError("save_best_mode must be 'max' or 'min'.")
+
+
+def _metadata_float(metadata: object, key: str) -> float | None:
+    if not isinstance(metadata, dict) or key not in metadata:
+        return None
+    value = metadata[key]
+    if value is None:
+        return None
+    return float(value)

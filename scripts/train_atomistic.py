@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 from stride.training import (
+    describe_atomistic_split,
     load_dataset_and_make_config,
-    save_atomistic_checkpoint,
     train_atomistic_value_model,
 )
 
@@ -44,6 +44,34 @@ def main() -> None:
         action="store_true",
         help="Only print final metrics, not per-epoch progress.",
     )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        help="Resume model and optimizer state from an existing checkpoint.",
+    )
+    parser.add_argument(
+        "--best-checkpoint",
+        type=Path,
+        default=None,
+        help="Path for the best checkpoint. Defaults to '<checkpoint>.best.pt'.",
+    )
+    parser.add_argument(
+        "--no-save-best",
+        action="store_true",
+        help="Disable saving a separate best checkpoint during training.",
+    )
+    parser.add_argument(
+        "--save-best-metric",
+        default="val_auroc",
+        help="Metric used to choose the best checkpoint.",
+    )
+    parser.add_argument(
+        "--save-best-mode",
+        choices=("max", "min"),
+        default="max",
+        help="Whether higher or lower save-best metric values are better.",
+    )
     args = parser.parse_args()
 
     dataset, config = load_dataset_and_make_config(
@@ -55,6 +83,54 @@ def main() -> None:
         dropout=args.dropout,
         radius=args.radius,
     )
+    best_checkpoint = None
+    if not args.no_save_best:
+        best_checkpoint = args.best_checkpoint or _default_best_checkpoint(args.checkpoint)
+
+    split_stats = describe_atomistic_split(
+        dataset=dataset,
+        validation_fraction=args.validation_fraction,
+        seed=args.seed,
+        split_strategy=args.split_strategy,
+    )
+    print(f"Dataset: {args.dataset_npz}", flush=True)
+    print(f"Examples: {int(split_stats['num_examples'])}", flush=True)
+    print(f"Overall positive rate: {split_stats['positive_rate']:.6g}", flush=True)
+    print(
+        "Train split: "
+        f"{int(split_stats['train_examples'])} examples, "
+        f"{int(split_stats['train_positives'])} positives, "
+        f"positive_rate={split_stats['train_positive_rate']:.6g}",
+        flush=True,
+    )
+    print(
+        "Validation split: "
+        f"{int(split_stats['val_examples'])} examples, "
+        f"{int(split_stats['val_positives'])} positives, "
+        f"positive_rate={split_stats['val_positive_rate']:.6g}",
+        flush=True,
+    )
+    if best_checkpoint is not None:
+        print(
+            f"Best checkpoint: {best_checkpoint} "
+            f"({args.save_best_mode} {args.save_best_metric})",
+            flush=True,
+        )
+    if args.resume_from is not None:
+        print(f"Resume from: {args.resume_from}", flush=True)
+
+    metadata = {
+        "dataset_npz": str(args.dataset_npz),
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.learning_rate,
+        "validation_fraction": args.validation_fraction,
+        "split_strategy": args.split_strategy,
+        "seed": args.seed,
+        "device": args.device,
+        "event_positive_weight": args.event_positive_weight,
+        "best_checkpoint": str(best_checkpoint) if best_checkpoint is not None else None,
+    }
     model, metrics = train_atomistic_value_model(
         dataset=dataset,
         config=config,
@@ -67,26 +143,17 @@ def main() -> None:
         split_strategy=args.split_strategy,
         event_positive_weight=_parse_event_positive_weight(args.event_positive_weight),
         progress_callback=None if args.quiet else _print_epoch_progress,
-    )
-    save_atomistic_checkpoint(
-        args.checkpoint,
-        model,
-        metrics,
-        metadata={
-            "dataset_npz": str(args.dataset_npz),
-            "epochs": args.epochs,
-            "batch_size": args.batch_size,
-            "learning_rate": args.learning_rate,
-            "validation_fraction": args.validation_fraction,
-            "split_strategy": args.split_strategy,
-            "seed": args.seed,
-            "device": args.device,
-            "event_positive_weight": args.event_positive_weight,
-        },
+        checkpoint_path=args.checkpoint,
+        checkpoint_metadata=metadata,
+        best_checkpoint_path=best_checkpoint,
+        save_best_metric=args.save_best_metric,
+        save_best_mode=args.save_best_mode,
+        resume_from=args.resume_from,
     )
 
-    print(f"Dataset: {args.dataset_npz}")
-    print(f"Checkpoint: {args.checkpoint}")
+    print(f"Final checkpoint: {args.checkpoint}")
+    if best_checkpoint is not None:
+        print(f"Best checkpoint: {best_checkpoint}")
     for key in sorted(metrics):
         print(f"{key}: {metrics[key]:.6g}")
 
@@ -107,6 +174,13 @@ def _parse_event_positive_weight(value: str) -> float | str:
     if value == "auto":
         return value
     return float(value)
+
+
+def _default_best_checkpoint(path: Path) -> Path:
+    suffix = "".join(path.suffixes)
+    if suffix:
+        return path.with_name(path.name[: -len(suffix)] + ".best" + suffix)
+    return path.with_name(path.name + ".best.pt")
 
 
 if __name__ == "__main__":

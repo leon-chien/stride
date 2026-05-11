@@ -161,6 +161,17 @@ conda run -n stride python scripts/score_atomistic.py outputs/sample_ligand_cont
 
 Generated files under `outputs/` are ignored and should not be committed.
 
+Training CLI notes:
+
+- `scripts/train_atomistic.py` prints split positive rates before training and
+  per-epoch progress after each validation pass.
+- It saves the final checkpoint to the requested checkpoint path and a best
+  checkpoint to `<checkpoint>.best.pt` unless `--no-save-best` is used.
+- Best checkpoint selection defaults to `--save-best-metric val_auroc
+  --save-best-mode max`.
+- Resume training with `--resume-from CHECKPOINT`; `--epochs` is interpreted as
+  the desired final epoch number, not additional epochs.
+
 First real dataset workflow:
 
 ```bash
