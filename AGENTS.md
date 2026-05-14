@@ -175,7 +175,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-35 passed
+39 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -218,6 +218,18 @@ WESTPA lineage report example:
 ```bash
 conda run -n stride python scripts/evaluate_westpa_lineage.py outputs/stride_dataset.npz --eval-split validation --iteration-split-strategy tail --output-dir outputs/reports/westpa_lineage_validation
 ```
+
+WESTPA pcoord-lineage training example:
+
+```bash
+conda run -n stride python scripts/train_westpa_lineage.py outputs/tutorial35_cell0_dim1_thr0.5.npz outputs/tutorial35_cell0_dim1_thr0.5.pt --epochs 50 --batch-size 128 --learning-rate 1e-4 --hidden-dim 64 --transformer-layers 1 --transformer-heads 4 --device cuda --event-positive-weight auto --split-strategy tail --save-best-metric val_auprc --save-best-mode max --early-stopping-patience 8
+conda run -n stride python scripts/score_westpa_lineage.py outputs/tutorial35_cell0_dim1_thr0.5.npz outputs/tutorial35_cell0_dim1_thr0.5.best.pt outputs/tutorial35_cell0_dim1_thr0.5_scores.npz --device cuda
+conda run -n stride python scripts/evaluate_westpa_lineage.py outputs/tutorial35_cell0_dim1_thr0.5.npz --stride-scores-npz outputs/tutorial35_cell0_dim1_thr0.5_scores.npz --rank-key p_event --eval-split validation --iteration-split-strategy tail --validation-fraction 0.2 --pcoord-target 0.5 --pcoord-dim 1 --output-dir outputs/reports/tutorial35_cell0_dim1_thr0.5_stride_validation
+```
+
+Tutorial 3.5 `cell_0`, `pcoord_dim=1`, `threshold=0.5` is the current pcoord
+lineage benchmark. The baseline to beat is `last_pcoord_low` with about
+`AUROC=0.6793` and `AUPRC=0.5056` on the tail validation split.
 
 WESTPA segment coordinate store example:
 

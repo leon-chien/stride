@@ -5,11 +5,17 @@ from stride.models.stride_value_model import (
     StrideValueModel,
     TemporalTransformer,
 )
+from stride.models.pcoord_lineage_model import (
+    PcoordLineageModelConfig,
+    PcoordLineageValueModel,
+)
 
 __all__ = [
     "EGNNFrameEncoder",
     "EGNNLayer",
     "NumericGoalEncoder",
+    "PcoordLineageModelConfig",
+    "PcoordLineageValueModel",
     "StrideModelConfig",
     "StrideValueModel",
     "TemporalTransformer",
