@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -126,6 +129,23 @@ def test_pcoord_lineage_split_holds_out_whole_iterations(tmp_path) -> None:
 
     assert set(dataset.n_iter[train_indices]).isdisjoint(set(dataset.n_iter[val_indices]))
     assert set(dataset.n_iter[val_indices]) == {5, 6}
+
+
+def test_default_best_checkpoint_preserves_decimal_threshold_names() -> None:
+    helper = _load_train_script_helper()
+    path = helper(Path("outputs/tutorial35_cell0_dim1_thr0.5.pt"))
+
+    assert path.name == "tutorial35_cell0_dim1_thr0.5.best.pt"
+
+
+def _load_train_script_helper():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "train_westpa_lineage.py"
+    spec = importlib.util.spec_from_file_location("train_westpa_lineage", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load train_westpa_lineage.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._default_best_checkpoint
 
 
 def _write_tiny_lineage_artifact(path) -> object:

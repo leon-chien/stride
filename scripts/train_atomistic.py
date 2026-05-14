@@ -230,7 +230,7 @@ def _parse_event_positive_weight(value: str) -> float | str:
 
 
 def _default_best_checkpoint(path: Path) -> Path:
-    suffix = "".join(path.suffixes)
+    suffix = path.suffix
     if suffix:
         return path.with_name(path.name[: -len(suffix)] + ".best" + suffix)
     return path.with_name(path.name + ".best.pt")
