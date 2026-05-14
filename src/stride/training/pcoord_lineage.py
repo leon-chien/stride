@@ -37,6 +37,11 @@ class PcoordLineageDataset:
     n_iter: np.ndarray
     seg_id: np.ndarray
     weights: np.ndarray | None = None
+    cell_id: np.ndarray | None = None
+    goal_id: np.ndarray | None = None
+    pcoord_dim: np.ndarray | None = None
+    threshold: np.ndarray | None = None
+    horizon_iterations: np.ndarray | None = None
 
     def validate(self) -> None:
         if self.pcoord_windows.ndim != 3:
@@ -56,6 +61,15 @@ class PcoordLineageDataset:
             raise ValueError("seg_id must have shape [examples].")
         if self.weights is not None and self.weights.shape != (num_examples,):
             raise ValueError("weights must have shape [examples].")
+        for name, value in (
+            ("cell_id", self.cell_id),
+            ("goal_id", self.goal_id),
+            ("pcoord_dim", self.pcoord_dim),
+            ("threshold", self.threshold),
+            ("horizon_iterations", self.horizon_iterations),
+        ):
+            if value is not None and value.shape != (num_examples,):
+                raise ValueError(f"{name} must have shape [examples].")
         if not np.all(np.any(self.window_mask, axis=1)):
             raise ValueError("Every pcoord window must contain at least one valid frame.")
 
@@ -84,6 +98,15 @@ def load_pcoord_lineage_dataset_npz(path: str | Path) -> PcoordLineageDataset:
         n_iter=data["n_iter"].astype(np.int64),
         seg_id=data["seg_id"].astype(np.int64),
         weights=weights,
+        cell_id=data["cell_id"].astype(str) if "cell_id" in data else None,
+        goal_id=data["goal_id"].astype(str) if "goal_id" in data else None,
+        pcoord_dim=data["pcoord_dim"].astype(np.int64) if "pcoord_dim" in data else None,
+        threshold=data["threshold"].astype(np.float32) if "threshold" in data else None,
+        horizon_iterations=(
+            data["horizon_iterations"].astype(np.int64)
+            if "horizon_iterations" in data
+            else None
+        ),
     )
     dataset.validate()
     return dataset
@@ -147,6 +170,8 @@ def split_pcoord_lineage_indices(
         validation_fraction=validation_fraction,
         split_strategy=split_strategy,
         seed=seed,
+        goal_id=dataset.goal_id,
+        cell_id=dataset.cell_id,
     )
 
 

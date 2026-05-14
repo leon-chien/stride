@@ -23,7 +23,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--iteration-split-strategy",
-        choices=("tail", "random_block"),
+        choices=(
+            "tail",
+            "random_block",
+            "heldout_goal",
+            "heldout_cell",
+            "random_goal",
+            "random_cell",
+        ),
         default="tail",
     )
     parser.add_argument("--validation-fraction", type=float, default=0.2)
@@ -56,6 +63,10 @@ def main() -> None:
     print(f"Metrics: {paths['metrics']}")
     print(f"Quantile precision/recall: {paths['quantiles']}")
     print(f"Score summary: {paths['summary']}")
+    if "grouped_metrics" in paths:
+        print(f"Grouped metrics: {paths['grouped_metrics']}")
+    if "grouped_markdown" in paths:
+        print(f"Grouped report: {paths['grouped_markdown']}")
 
 
 if __name__ == "__main__":

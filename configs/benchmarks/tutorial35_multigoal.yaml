@@ -1,0 +1,44 @@
+benchmark:
+  name: tutorial35_multigoal
+  window_iterations: 8
+  pcoord_frame_index: -1
+  require_full_window: true
+  include_self_in_label: false
+  cells:
+    - cell_id: cell_0
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_0/west.h5
+    - cell_id: cell_1
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_1/west.h5
+    - cell_id: cell_2
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_2/west.h5
+    - cell_id: cell_3
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_3/west.h5
+    - cell_id: cell_4
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_4/west.h5
+    - cell_id: cell_5
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_5/west.h5
+    - cell_id: cell_6
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_6/west.h5
+    - cell_id: cell_7
+      west_h5: ../../../westpa_tutorials/old_tutorials/advanced_tutorials/WESTPA2/tutorial-3.5/dataset/cell_7/west.h5
+  goals:
+    - goal_id: dim1_thr0.25_h5
+      pcoord_dim: 1
+      threshold: 0.25
+      horizon_iterations: 5
+    - goal_id: dim1_thr0.5_h5
+      pcoord_dim: 1
+      threshold: 0.5
+      horizon_iterations: 5
+    - goal_id: dim1_thr1.0_h5
+      pcoord_dim: 1
+      threshold: 1.0
+      horizon_iterations: 5
+    - goal_id: dim1_thr0.5_h10
+      pcoord_dim: 1
+      threshold: 0.5
+      horizon_iterations: 10
+    - goal_id: dim0_thr0.5_h5
+      pcoord_dim: 0
+      threshold: 0.5
+      horizon_iterations: 5

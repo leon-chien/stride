@@ -175,7 +175,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-39 passed
+44 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -230,6 +230,21 @@ conda run -n stride python scripts/evaluate_westpa_lineage.py outputs/tutorial35
 Tutorial 3.5 `cell_0`, `pcoord_dim=1`, `threshold=0.5` is the current pcoord
 lineage benchmark. The baseline to beat is `last_pcoord_low` with about
 `AUROC=0.6793` and `AUPRC=0.5056` on the tail validation split.
+
+WESTPA multi-goal benchmark example:
+
+```bash
+conda run -n stride python scripts/build_westpa_multigoal_lineage.py configs/benchmarks/tutorial35_multigoal.yaml outputs/tutorial35_multigoal.npz
+conda run -n stride python scripts/train_westpa_lineage.py outputs/tutorial35_multigoal.npz outputs/tutorial35_multigoal.pt --epochs 50 --batch-size 128 --learning-rate 1e-4 --hidden-dim 64 --transformer-layers 1 --transformer-heads 4 --device cuda --event-positive-weight auto --split-strategy tail --save-best-metric val_auprc --save-best-mode max --early-stopping-patience 8
+conda run -n stride python scripts/score_westpa_lineage.py outputs/tutorial35_multigoal.npz outputs/tutorial35_multigoal.best.pt outputs/tutorial35_multigoal_scores.npz --device cuda
+conda run -n stride python scripts/evaluate_westpa_lineage.py outputs/tutorial35_multigoal.npz --stride-scores-npz outputs/tutorial35_multigoal_scores.npz --rank-key p_event --eval-split validation --iteration-split-strategy tail --validation-fraction 0.2 --output-dir outputs/reports/tutorial35_multigoal_validation
+conda run -n stride python scripts/summarize_westpa_reports.py outputs/reports/tutorial35_multigoal_seed*_validation --output-csv outputs/reports/tutorial35_multigoal_seed_summary.csv --output-md outputs/reports/tutorial35_multigoal_seed_summary.md
+```
+
+Multi-goal lineage artifacts include `cell_id`, `goal_id`, `pcoord_dim`,
+`threshold`, and `horizon_iterations` metadata. `scripts/train_westpa_lineage.py`
+and `scripts/evaluate_westpa_lineage.py` support `heldout_goal` and
+`heldout_cell` split strategies for generalization checks.
 
 WESTPA segment coordinate store example:
 

@@ -22,9 +22,16 @@ def main() -> None:
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument(
         "--split-strategy",
-        choices=("tail", "random_block"),
+        choices=(
+            "tail",
+            "random_block",
+            "heldout_goal",
+            "heldout_cell",
+            "random_goal",
+            "random_cell",
+        ),
         default="tail",
-        help="Hold out whole WESTPA iterations.",
+        help="Hold out whole WESTPA iterations, goals, or cells.",
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--hidden-dim", type=int, default=64)

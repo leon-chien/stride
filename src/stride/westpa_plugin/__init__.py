@@ -16,6 +16,10 @@ from stride.westpa_plugin.runtime_scorer import (
     RuntimeScoringResult,
     StrideRuntimeScorer,
 )
+from stride.westpa_plugin.multigoal import (
+    MultiGoalBuildReport,
+    build_multigoal_lineage_dataset_from_yaml,
+)
 from stride.westpa_plugin.segment_coordinates import (
     SegmentCoordinateBuildReport,
     build_segment_coordinate_store,
@@ -29,6 +33,7 @@ __all__ = [
     "LineageWindow",
     "RuntimeScoringInput",
     "RuntimeScoringResult",
+    "MultiGoalBuildReport",
     "SegmentCoordinateBuildReport",
     "SegmentCoordinateStore",
     "SegmentKey",
@@ -38,6 +43,7 @@ __all__ = [
     "ValueMapperConfig",
     "build_coordinate_atomistic_dataset",
     "build_lineage_windows",
+    "build_multigoal_lineage_dataset_from_yaml",
     "build_segment_coordinate_store",
     "compute_delayed_labels",
     "load_segment_coordinate_store_npz",
