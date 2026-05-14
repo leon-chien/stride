@@ -16,6 +16,12 @@ from stride.westpa_plugin.runtime_scorer import (
     RuntimeScoringResult,
     StrideRuntimeScorer,
 )
+from stride.westpa_plugin.segment_coordinates import (
+    SegmentCoordinateBuildReport,
+    build_segment_coordinate_store,
+    save_segment_coordinate_store_npz,
+    segment_trajectory_path,
+)
 from stride.westpa_plugin.value_mapper import StrideValueBinMapper, ValueMapperConfig
 
 __all__ = [
@@ -23,6 +29,7 @@ __all__ = [
     "LineageWindow",
     "RuntimeScoringInput",
     "RuntimeScoringResult",
+    "SegmentCoordinateBuildReport",
     "SegmentCoordinateStore",
     "SegmentKey",
     "SegmentRecord",
@@ -31,8 +38,11 @@ __all__ = [
     "ValueMapperConfig",
     "build_coordinate_atomistic_dataset",
     "build_lineage_windows",
+    "build_segment_coordinate_store",
     "compute_delayed_labels",
     "load_segment_coordinate_store_npz",
     "load_segment_records",
+    "save_segment_coordinate_store_npz",
     "save_westpa_atomistic_dataset_npz",
+    "segment_trajectory_path",
 ]

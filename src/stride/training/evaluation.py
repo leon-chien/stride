@@ -54,6 +54,68 @@ def dihedral_window_baseline_scores(
     return scores
 
 
+def atom_pair_distance_baseline_scores(
+    dataset: AtomisticDataset,
+    atom_indices: tuple[int, int],
+    mode: str = "last_frame",
+    direction: str = "low",
+    target: float | None = None,
+) -> np.ndarray:
+    """
+    Score examples by a simple atom-pair distance baseline.
+
+    Higher is always treated as better by the evaluation report. For association
+    events, use direction="low"; for dissociation events, use direction="high".
+    If target is provided, examples are ranked by proximity to that distance.
+    """
+    dataset.validate()
+    if mode not in {"last_frame", "window_min", "window_max"}:
+        raise ValueError("mode must be 'last_frame', 'window_min', or 'window_max'.")
+    if direction not in {"low", "high", "proximity"}:
+        raise ValueError("direction must be 'low', 'high', or 'proximity'.")
+    if len(atom_indices) != 2:
+        raise ValueError("atom_indices must contain exactly two atom indices.")
+
+    atom_a, atom_b = atom_indices
+    num_atoms = dataset.coordinates.shape[2]
+    if atom_a < 0 or atom_b < 0 or atom_a >= num_atoms or atom_b >= num_atoms:
+        raise ValueError("atom pair indices are out of range for this dataset.")
+
+    scores = np.empty((dataset.coordinates.shape[0],), dtype=np.float32)
+    for example_index, window in enumerate(dataset.coordinates):
+        valid_frames = np.flatnonzero(dataset.frame_mask[example_index])
+        if len(valid_frames) == 0:
+            raise ValueError("Every atomistic window must contain at least one valid frame.")
+        if mode == "last_frame":
+            frame_indices = [int(valid_frames[-1])]
+        else:
+            frame_indices = [int(index) for index in valid_frames]
+
+        distances = np.asarray(
+            [
+                np.linalg.norm(window[frame_index, atom_a] - window[frame_index, atom_b])
+                for frame_index in frame_indices
+            ],
+            dtype=np.float32,
+        )
+        if mode == "window_min":
+            distance = float(np.min(distances))
+        elif mode == "window_max":
+            distance = float(np.max(distances))
+        else:
+            distance = float(distances[-1])
+
+        if target is not None or direction == "proximity":
+            if target is None:
+                raise ValueError("target is required when direction='proximity'.")
+            scores[example_index] = -abs(distance - float(target))
+        elif direction == "low":
+            scores[example_index] = -distance
+        else:
+            scores[example_index] = distance
+    return scores
+
+
 def random_baseline_scores(num_examples: int, seed: int = 0) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return rng.random(num_examples, dtype=np.float32)

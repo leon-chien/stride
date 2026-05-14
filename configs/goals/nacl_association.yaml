@@ -1,0 +1,9 @@
+goal:
+  name: nacl_association
+  type: distance_threshold
+  selections:
+    - pcoord
+  operator: less_than
+  threshold: 2.6
+  horizon_iterations: 4
+  value_target: event_and_flux

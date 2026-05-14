@@ -1,0 +1,9 @@
+goal:
+  name: westpa_distance_threshold
+  type: distance_threshold
+  selections:
+    - pcoord
+  operator: less_than
+  threshold: 0.35
+  horizon_iterations: 8
+  value_target: event_and_flux

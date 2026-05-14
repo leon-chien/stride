@@ -39,6 +39,9 @@ Current repository foundation:
 - A `scripts/extract_westpa_dataset.py` CLI that turns a `west.h5` file and a
   structured goal YAML into a STRIDE `.npz` training artifact.
 - Optional coordinate-aware WESTPA extraction:
+  - `scripts/build_westpa_segment_coordinates.py` builds the required
+    per-segment coordinate store from a `west.h5`, topology, trajectory root,
+    and a format pattern such as `{n_iter:06d}/{seg_id:06d}/seg.xtc`.
   - `scripts/extract_westpa_dataset.py --segment-coordinates-npz ...` maps
     segment keyed coordinate frames into canonical atomistic lineage windows.
   - WESTPA provenance arrays are saved alongside atomistic datasets:
@@ -79,6 +82,7 @@ Current repository foundation:
   - `scripts/score_atomistic.py`
   - `scripts/evaluate_atomistic.py`
   - `scripts/evaluate_westpa_lineage.py`
+  - `scripts/build_westpa_segment_coordinates.py`
 - Atomistic tests that pass a small protein-ligand contact dataset through the
   existing eGNN + Temporal Transformer value model.
 - PDB conversion, dihedral labeling, and atomistic checkpoint tests.
@@ -171,7 +175,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-29 passed
+35 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -195,8 +199,9 @@ Training CLI notes:
 - Resume training with `--resume-from CHECKPOINT`; `--epochs` is interpreted as
   the desired final epoch number, not additional epochs.
 - Use `--split-strategy blocked` for a purged random held-out trajectory block
-  and `--split-strategy blocked_tail` for a purged tail chunk. Keep
-  `--split-strategy random` as a fast diagnostic, not final evidence.
+  and `--split-strategy blocked_tail` for a purged tail chunk. For small WESTPA
+  tutorial datasets, use `--split-strategy iteration_balanced` to hold out whole
+  iterations while keeping positives in both train and validation.
 - Early stopping is available with `--early-stopping-patience`; it monitors the
   same metric configured by `--save-best-metric`.
 - Optional scheduler choices are `--lr-scheduler cosine` and
@@ -213,6 +218,33 @@ WESTPA lineage report example:
 ```bash
 conda run -n stride python scripts/evaluate_westpa_lineage.py outputs/stride_dataset.npz --eval-split validation --iteration-split-strategy tail --output-dir outputs/reports/westpa_lineage_validation
 ```
+
+WESTPA segment coordinate store example:
+
+```bash
+conda run -n stride python scripts/build_westpa_segment_coordinates.py path/to/west.h5 path/to/topology.pdb path/to/traj_segs outputs/segment_coordinates.npz --trajectory-pattern "{n_iter:06d}/{seg_id:06d}/seg.xtc" --frame-index -1 --coordinate-units nm
+conda run -n stride python scripts/extract_westpa_dataset.py path/to/west.h5 configs/goals/westpa_distance_threshold.yaml outputs/westpa_atomistic_stride.npz --segment-coordinates-npz outputs/segment_coordinates.npz --window-iterations 8
+```
+
+NaCl WESTPA tutorial benchmark:
+
+```bash
+conda run -n stride python scripts/extract_westpa_dataset.py /Users/leonchien/Projects/westpa_tutorials/tutorials7.1-7.4/tutorial7.1-basic-nacl/west.h5 configs/goals/nacl_association.yaml outputs/nacl_westpa_pcoord_stride.npz --window-iterations 4 --horizon-iterations 4
+conda run -n stride python scripts/build_westpa_segment_coordinates.py /Users/leonchien/Projects/westpa_tutorials/tutorials7.1-7.4/tutorial7.1-basic-nacl/west.h5 /Users/leonchien/Projects/westpa_tutorials/tutorials7.1-7.4/tutorial7.1-basic-nacl/common_files/bstate.pdb /Users/leonchien/Projects/westpa_tutorials/tutorials7.1-7.4/tutorial7.1-basic-nacl/traj_segs outputs/nacl_ions_segment_coordinates.npz --trajectory-pattern "{n_iter:06d}/{seg_id:06d}/seg.dcd" --frame-index -1 --coordinate-units angstrom --mda-selection "not resname HOH" --allow-missing
+conda run -n stride python scripts/extract_westpa_dataset.py /Users/leonchien/Projects/westpa_tutorials/tutorials7.1-7.4/tutorial7.1-basic-nacl/west.h5 configs/goals/nacl_association.yaml outputs/nacl_ions_westpa_atomistic_stride.npz --segment-coordinates-npz outputs/nacl_ions_segment_coordinates.npz --window-iterations 4 --horizon-iterations 4
+conda run -n stride python scripts/train_atomistic.py outputs/nacl_ions_westpa_atomistic_stride.npz outputs/nacl_ions_westpa_balanced.pt --epochs 10 --batch-size 32 --learning-rate 1e-4 --hidden-dim 32 --egnn-layers 1 --transformer-layers 1 --transformer-heads 4 --dropout 0.0 --device cpu --event-positive-weight auto --split-strategy iteration_balanced --save-best-metric val_auprc --save-best-mode max --early-stopping-patience 4
+conda run -n stride python scripts/evaluate_atomistic.py outputs/nacl_ions_westpa_atomistic_stride.npz --checkpoint outputs/nacl_ions_westpa_balanced.best.pt --goal-yaml configs/goals/nacl_association.yaml --atom-pair-indices 0,1 --distance-direction low --eval-split validation --split-strategy iteration_balanced --output-dir outputs/reports/nacl_ions_westpa_balanced_validation_westpa_baselines --device cpu
+```
+
+Current NaCl smoke result with ion-only coordinates:
+`val_auroc=0.6096`, `val_auprc=0.2829`, validation positive rate `0.2154`.
+The validation report includes STRIDE, atom-pair distance, WESTPA pcoord, and
+random baselines; STRIDE beats the simple non-random baselines on this tiny
+held-out split. This is a pipeline benchmark, not a final model result.
+
+Last-frame ablations can be trained by adding `--history-frames 1` to
+`scripts/train_atomistic.py` and evaluated with the same flag in
+`scripts/evaluate_atomistic.py`.
 
 First real dataset workflow:
 

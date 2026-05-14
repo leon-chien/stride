@@ -7,6 +7,7 @@ from stride.training import (
     describe_atomistic_split,
     load_dataset_and_make_config,
     train_atomistic_value_model,
+    truncate_atomistic_history,
 )
 
 
@@ -22,11 +23,19 @@ def main() -> None:
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument(
         "--split-strategy",
-        choices=("contiguous", "random", "blocked", "blocked_tail"),
+        choices=(
+            "contiguous",
+            "random",
+            "blocked",
+            "blocked_tail",
+            "iteration_tail",
+            "iteration_random",
+            "iteration_balanced",
+        ),
         default="contiguous",
         help=(
-            "Train/validation split. Use blocked or blocked_tail for purged "
-            "trajectory chunk evaluation."
+            "Train/validation split. Use iteration_balanced for small WESTPA "
+            "lineage datasets where purged tail splits can remove all positives."
         ),
     )
     parser.add_argument("--seed", type=int, default=7)
@@ -36,6 +45,15 @@ def main() -> None:
     parser.add_argument("--transformer-heads", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--radius", type=float, default=None)
+    parser.add_argument(
+        "--history-frames",
+        type=int,
+        default=None,
+        help=(
+            "Use only the most recent N frames from each window. Use 1 for a "
+            "last-frame-only temporal ablation."
+        ),
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument(
         "--event-positive-weight",
@@ -104,6 +122,7 @@ def main() -> None:
         dropout=args.dropout,
         radius=args.radius,
     )
+    dataset = truncate_atomistic_history(dataset, args.history_frames)
     best_checkpoint = None
     if not args.no_save_best:
         best_checkpoint = args.best_checkpoint or _default_best_checkpoint(args.checkpoint)
@@ -150,6 +169,7 @@ def main() -> None:
         "seed": args.seed,
         "device": args.device,
         "event_positive_weight": args.event_positive_weight,
+        "history_frames": args.history_frames,
         "best_checkpoint": str(best_checkpoint) if best_checkpoint is not None else None,
         "early_stopping_patience": args.early_stopping_patience,
         "early_stopping_min_delta": args.early_stopping_min_delta,

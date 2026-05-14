@@ -8,6 +8,7 @@ from stride.data import build_sample_ligand_contact_dataset
 from stride.training.atomistic import _evaluate_model, _to_tensor_dataset
 from stride.training.atomistic import _split_indices
 from stride.training.evaluation import (
+    atom_pair_distance_baseline_scores,
     dihedral_window_baseline_scores,
     write_evaluation_report,
 )
@@ -19,6 +20,7 @@ from stride.training import (
     score_atomistic_dataset,
     split_atomistic_indices,
     train_atomistic_value_model,
+    truncate_atomistic_history,
 )
 from stride.models import StrideModelConfig
 
@@ -216,6 +218,55 @@ def test_blocked_split_avoids_overlapping_windows() -> None:
     assert len(val_np) > 0
 
 
+def test_iteration_balanced_split_keeps_positive_examples_in_both_splits() -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=16,
+    )
+    labels = dataset.event_labels.copy()
+    starts = np.asarray([4, 4, 5, 5, 6, 6, 7, 7, 8, 8], dtype=np.int64)
+    labels = np.asarray([0, 0, 0, 1, 0, 1, 0, 1, 1, 1], dtype=np.float32)
+    dataset = type(dataset)(
+        coordinates=dataset.coordinates[: len(labels)],
+        atom_features=dataset.atom_features[: len(labels)],
+        atom_mask=dataset.atom_mask[: len(labels)],
+        frame_mask=dataset.frame_mask[: len(labels)],
+        goal_features=dataset.goal_features[: len(labels)],
+        event_labels=labels,
+        flux_labels=labels,
+        source_frame_start=starts,
+    )
+
+    train_indices, val_indices = split_atomistic_indices(
+        dataset,
+        validation_fraction=0.4,
+        seed=7,
+        split_strategy="iteration_balanced",
+    )
+
+    assert np.unique(dataset.source_frame_start[val_indices]).size == 2
+    assert dataset.event_labels[train_indices].sum() > 0
+    assert dataset.event_labels[val_indices].sum() > 0
+    assert dataset.event_labels[train_indices].sum() < len(train_indices)
+    assert dataset.event_labels[val_indices].sum() < len(val_indices)
+
+
+def test_truncate_atomistic_history_keeps_last_frames() -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+
+    truncated = truncate_atomistic_history(dataset, history_frames=1)
+
+    assert truncated.coordinates.shape[1] == 1
+    assert truncated.frame_mask.shape[1] == 1
+    assert np.allclose(truncated.coordinates[:, 0], dataset.coordinates[:, -1])
+    assert np.array_equal(truncated.event_labels, dataset.event_labels)
+
+
 def test_validation_evaluation_uses_batches() -> None:
     dataset = build_sample_ligand_contact_dataset(
         window_size=4,
@@ -305,6 +356,32 @@ def test_dihedral_baseline_scores_one_value_per_example() -> None:
 
     assert scores.shape == dataset.event_labels.shape
     assert np.isfinite(scores).all()
+
+
+def test_atom_pair_distance_baseline_scores_one_value_per_example() -> None:
+    dataset = build_sample_ligand_contact_dataset(
+        window_size=4,
+        horizon=2,
+        num_frames=12,
+    )
+
+    last_scores = atom_pair_distance_baseline_scores(
+        dataset,
+        atom_indices=(0, 1),
+        mode="last_frame",
+        direction="low",
+    )
+    window_scores = atom_pair_distance_baseline_scores(
+        dataset,
+        atom_indices=(0, 1),
+        mode="window_min",
+        direction="low",
+    )
+
+    assert last_scores.shape == dataset.event_labels.shape
+    assert window_scores.shape == dataset.event_labels.shape
+    assert np.isfinite(last_scores).all()
+    assert np.isfinite(window_scores).all()
 
 
 def test_evaluation_report_handles_rare_positives(tmp_path) -> None:

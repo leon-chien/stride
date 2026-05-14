@@ -350,6 +350,38 @@ def load_dataset_and_make_config(
     return dataset, config
 
 
+def truncate_atomistic_history(
+    dataset: AtomisticDataset,
+    history_frames: int | None,
+) -> AtomisticDataset:
+    """
+    Keep only the most recent frames in each atomistic lineage window.
+
+    This supports controlled temporal ablations: history_frames=1 gives a
+    last-frame-only model while preserving the same atom features and labels.
+    """
+    dataset.validate()
+    if history_frames is None:
+        return dataset
+    history_frames = int(history_frames)
+    if history_frames <= 0:
+        raise ValueError("history_frames must be positive.")
+    window_size = dataset.coordinates.shape[1]
+    if history_frames >= window_size:
+        return dataset
+
+    return AtomisticDataset(
+        coordinates=dataset.coordinates[:, -history_frames:, :, :].copy(),
+        atom_features=dataset.atom_features.copy(),
+        atom_mask=dataset.atom_mask.copy(),
+        frame_mask=dataset.frame_mask[:, -history_frames:].copy(),
+        goal_features=dataset.goal_features.copy(),
+        event_labels=dataset.event_labels.copy(),
+        flux_labels=dataset.flux_labels.copy(),
+        source_frame_start=dataset.source_frame_start.copy(),
+    )
+
+
 def describe_atomistic_split(
     dataset: AtomisticDataset,
     validation_fraction: float = 0.2,
@@ -399,6 +431,7 @@ def split_atomistic_indices(
         split_strategy=split_strategy,
         source_frame_start=dataset.source_frame_start,
         window_size=dataset.coordinates.shape[1],
+        event_labels=dataset.event_labels,
     )
     return train_indices.numpy(), val_indices.numpy()
 
@@ -418,6 +451,7 @@ def _make_loaders(
         split_strategy=split_strategy,
         source_frame_start=dataset.source_frame_start,
         window_size=dataset.coordinates.shape[1],
+        event_labels=dataset.event_labels,
     )
 
     train_subset = torch.utils.data.Subset(tensor_dataset, train_indices.tolist())
@@ -438,6 +472,7 @@ def _split_indices(
     split_strategy: str,
     source_frame_start: np.ndarray | None = None,
     window_size: int | None = None,
+    event_labels: np.ndarray | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     val_count = int(round(num_examples * validation_fraction))
     if num_examples < 3:
@@ -471,10 +506,20 @@ def _split_indices(
             window_size=window_size,
             block_start="tail",
         )
+    elif split_strategy in {"iteration_tail", "iteration_random", "iteration_balanced"}:
+        train_indices, val_indices = _iteration_split_indices(
+            num_examples=num_examples,
+            validation_fraction=validation_fraction,
+            seed=seed,
+            split_strategy=split_strategy,
+            source_frame_start=source_frame_start,
+            event_labels=event_labels,
+        )
     else:
         raise ValueError(
             "split_strategy must be 'contiguous', 'random', 'blocked', "
-            "or 'blocked_tail'."
+            "'blocked_tail', 'iteration_tail', 'iteration_random', "
+            "or 'iteration_balanced'."
         )
 
     return train_indices, val_indices
@@ -534,6 +579,94 @@ def _blocked_split_indices(
         torch.tensor(train_indices_np, dtype=torch.long),
         torch.tensor(val_indices_np, dtype=torch.long),
     )
+
+
+def _iteration_split_indices(
+    num_examples: int,
+    validation_fraction: float,
+    seed: int,
+    split_strategy: str,
+    source_frame_start: np.ndarray | None,
+    event_labels: np.ndarray | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if source_frame_start is None:
+        source_frame_start = np.arange(num_examples, dtype=np.int64)
+    starts = np.asarray(source_frame_start, dtype=np.int64)
+    if starts.shape != (num_examples,):
+        raise ValueError("source_frame_start must have one value per example.")
+
+    unique_starts = np.unique(starts)
+    if unique_starts.size < 3:
+        return _split_indices(
+            num_examples=num_examples,
+            validation_fraction=validation_fraction,
+            seed=seed,
+            split_strategy="random",
+        )
+
+    val_group_count = int(round(unique_starts.size * validation_fraction))
+    val_group_count = min(max(val_group_count, 1), unique_starts.size - 1)
+    if split_strategy == "iteration_tail":
+        val_starts = unique_starts[-val_group_count:]
+    elif split_strategy == "iteration_random":
+        rng = np.random.default_rng(seed)
+        start = int(rng.integers(0, unique_starts.size - val_group_count + 1))
+        val_starts = unique_starts[start : start + val_group_count]
+    elif split_strategy == "iteration_balanced":
+        if event_labels is None:
+            raise ValueError("iteration_balanced requires event_labels.")
+        val_starts = _balanced_iteration_block(
+            unique_starts=unique_starts,
+            starts=starts,
+            labels=np.asarray(event_labels, dtype=np.float32),
+            val_group_count=val_group_count,
+        )
+    else:
+        raise ValueError(f"Unknown iteration split strategy: {split_strategy}")
+
+    val_mask = np.isin(starts, val_starts)
+    train_indices_np = np.flatnonzero(~val_mask)
+    val_indices_np = np.flatnonzero(val_mask)
+    if train_indices_np.size == 0 or val_indices_np.size == 0:
+        raise ValueError("Iteration split produced an empty train or validation set.")
+    return (
+        torch.tensor(train_indices_np, dtype=torch.long),
+        torch.tensor(val_indices_np, dtype=torch.long),
+    )
+
+
+def _balanced_iteration_block(
+    unique_starts: np.ndarray,
+    starts: np.ndarray,
+    labels: np.ndarray,
+    val_group_count: int,
+) -> np.ndarray:
+    if labels.shape != starts.shape:
+        raise ValueError("event_labels must have one value per example.")
+    overall_rate = float(np.mean(labels))
+    best_starts = unique_starts[:val_group_count]
+    best_score = float("inf")
+    for start in range(0, unique_starts.size - val_group_count + 1):
+        candidate = unique_starts[start : start + val_group_count]
+        val_mask = np.isin(starts, candidate)
+        train_labels = labels[~val_mask]
+        val_labels = labels[val_mask]
+        if train_labels.size == 0 or val_labels.size == 0:
+            continue
+        train_rate = float(np.mean(train_labels))
+        val_rate = float(np.mean(val_labels))
+        train_has_both = np.unique(train_labels >= 0.5).size == 2
+        val_has_both = np.unique(val_labels >= 0.5).size == 2
+        class_penalty = 0.0 if train_has_both and val_has_both else 10.0
+        score = (
+            abs(train_rate - overall_rate)
+            + abs(val_rate - overall_rate)
+            + class_penalty
+        )
+        if score < best_score:
+            best_score = score
+            best_starts = candidate
+    return best_starts
 
 
 def _to_tensor_dataset(dataset: AtomisticDataset) -> TensorDataset:

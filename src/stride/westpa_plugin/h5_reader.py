@@ -656,7 +656,11 @@ def build_coordinate_atomistic_dataset(
     current_seg_id: list[int] = []
     lineage_n_iter: list[np.ndarray] = []
     lineage_seg_id: list[np.ndarray] = []
+    lineage_pcoord: list[np.ndarray] = []
+    lineage_pcoord_mask: list[np.ndarray] = []
     weights: list[float] = []
+    first_record = next(iter(records.values()))
+    pcoord_shape = np.asarray(first_record.pcoord[pcoord_frame_index]).shape
 
     for key in sorted(records, key=lambda item: (item.n_iter, item.seg_id)):
         lineage = trace_ancestor_keys(records, key, window_iterations)
@@ -678,6 +682,8 @@ def build_coordinate_atomistic_dataset(
         frame_mask = np.zeros((window_iterations,), dtype=bool)
         padded_lineage_n_iter = np.full((window_iterations,), -1, dtype=np.int64)
         padded_lineage_seg_id = np.full((window_iterations,), -1, dtype=np.int64)
+        padded_pcoord = np.zeros((window_iterations, *pcoord_shape), dtype=np.float32)
+        pcoord_mask = np.zeros((window_iterations,), dtype=bool)
 
         trimmed = available[-window_iterations:]
         offset = window_iterations - len(trimmed)
@@ -686,7 +692,12 @@ def build_coordinate_atomistic_dataset(
             padded_coords[window_index] = coordinates.coordinates[coordinate_index_value]
             padded_lineage_n_iter[window_index] = lineage_key.n_iter
             padded_lineage_seg_id[window_index] = lineage_key.seg_id
+            padded_pcoord[window_index] = np.asarray(
+                records[lineage_key].pcoord[pcoord_frame_index],
+                dtype=np.float32,
+            )
             frame_mask[window_index] = True
+            pcoord_mask[window_index] = True
 
         current_coordinate_index = coordinate_index[trimmed[-1]]
         padded_atom_features[:] = coordinates.atom_features[current_coordinate_index]
@@ -704,6 +715,8 @@ def build_coordinate_atomistic_dataset(
         current_seg_id.append(int(key.seg_id))
         lineage_n_iter.append(padded_lineage_n_iter)
         lineage_seg_id.append(padded_lineage_seg_id)
+        lineage_pcoord.append(padded_pcoord)
+        lineage_pcoord_mask.append(pcoord_mask)
         weights.append(float(records[key].weight))
 
     if not window_coordinates:
@@ -728,6 +741,8 @@ def build_coordinate_atomistic_dataset(
         "westpa_seg_id": np.asarray(current_seg_id, dtype=np.int64),
         "westpa_lineage_n_iter": np.stack(lineage_n_iter).astype(np.int64),
         "westpa_lineage_seg_id": np.stack(lineage_seg_id).astype(np.int64),
+        "westpa_pcoord_windows": np.stack(lineage_pcoord).astype(np.float32),
+        "westpa_pcoord_window_mask": np.stack(lineage_pcoord_mask).astype(bool),
         "westpa_weights": np.asarray(weights, dtype=np.float64),
     }
     return dataset, provenance
