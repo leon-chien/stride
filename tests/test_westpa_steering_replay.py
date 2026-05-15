@@ -165,6 +165,7 @@ def test_replay_writes_deployment_control_config(tmp_path) -> None:
             score_key="p_event",
             stride_scores_path="outputs/scores.npz",
             checkpoint_path="outputs/model.best.pt",
+            stride_fusion_alpha="auto",
         ),
     )
 
@@ -172,7 +173,9 @@ def test_replay_writes_deployment_control_config(tmp_path) -> None:
     assert payload["bin_reference"] == "train"
     assert payload["checkpoint_path"] == "outputs/model.best.pt"
     assert payload["stride_scores_npz"] == "outputs/scores.npz"
+    assert payload["stride_fusion_alpha"] == "auto"
     assert payload["rankers"]["stride"]["score_key"] == "p_event"
+    assert payload["rankers"]["stride"]["baseline_fusion_alpha"] >= 0.0
     assert len(payload["rankers"]["stride"]["bin_edges"]) == 3
 
 

@@ -11,7 +11,9 @@ from stride.training.atomistic import (
 )
 from stride.training.pcoord_lineage import (
     PcoordLineageDataset,
+    build_pcoord_feature_transform,
     describe_pcoord_lineage_split,
+    engineer_pcoord_window_features,
     load_lineage_dataset_and_make_config,
     load_pcoord_lineage_checkpoint,
     load_pcoord_lineage_dataset_npz,
@@ -19,6 +21,7 @@ from stride.training.pcoord_lineage import (
     score_pcoord_lineage_dataset,
     split_pcoord_lineage_indices,
     train_pcoord_lineage_value_model,
+    transform_pcoord_lineage_dataset,
 )
 from stride.training.evaluation import (
     atom_pair_distance_baseline_scores,
@@ -50,8 +53,10 @@ __all__ = [
     "dihedral_window_baseline_scores",
     "evaluate_rankers",
     "PcoordLineageDataset",
+    "build_pcoord_feature_transform",
     "random_baseline_scores",
     "describe_pcoord_lineage_split",
+    "engineer_pcoord_window_features",
     "load_lineage_dataset_and_make_config",
     "load_pcoord_lineage_checkpoint",
     "load_pcoord_lineage_dataset_npz",
@@ -64,6 +69,7 @@ __all__ = [
     "stride_value_loss",
     "train_atomistic_value_model",
     "train_pcoord_lineage_value_model",
+    "transform_pcoord_lineage_dataset",
     "truncate_atomistic_history",
     "westpa_iteration_split_indices",
     "write_evaluation_report",

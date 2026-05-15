@@ -188,7 +188,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-52 passed
+53 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -277,6 +277,12 @@ End-to-end steering benchmark wrapper:
 micromamba run -n stride python scripts/run_westpa_steering_benchmark.py outputs/tutorial35_multigoal.npz outputs/tutorial35_multigoal_heldout_cell --mode heldout_cell --device cuda
 micromamba run -n stride python scripts/run_westpa_steering_benchmark.py outputs/tutorial35_multigoal.npz outputs/tutorial35_multigoal_heldout_goal --mode heldout_goal --device cuda
 ```
+
+The benchmark wrapper defaults to `--feature-mode engineered`, which trains on
+raw pcoord, train-normalized pcoord, temporal deltas, window summary features,
+and goal-threshold distance features. It also defaults replay to
+`--stride-fusion-alpha auto`, which tunes a train-only residual blend of STRIDE
+and the chosen pcoord baseline for steering replay.
 
 WESTPA segment coordinate store example:
 

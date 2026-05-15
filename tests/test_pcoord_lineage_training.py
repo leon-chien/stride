@@ -8,6 +8,8 @@ import torch
 
 from stride.models import PcoordLineageModelConfig, PcoordLineageValueModel
 from stride.training import (
+    build_pcoord_feature_transform,
+    engineer_pcoord_window_features,
     load_lineage_dataset_and_make_config,
     load_pcoord_lineage_checkpoint,
     load_pcoord_lineage_dataset_npz,
@@ -56,6 +58,29 @@ def test_pcoord_lineage_model_outputs_one_score_per_example() -> None:
     assert torch.isfinite(outputs["stride_score"]).all()
 
 
+def test_pcoord_feature_transform_uses_train_statistics(tmp_path) -> None:
+    artifact = _write_tiny_lineage_artifact(tmp_path / "lineage.npz")
+    dataset = load_pcoord_lineage_dataset_npz(artifact)
+
+    transform = build_pcoord_feature_transform(dataset, np.arange(8), mode="engineered")
+    features = engineer_pcoord_window_features(
+        dataset.pcoord_windows,
+        dataset.window_mask,
+        transform,
+        pcoord_dim=np.ones((len(dataset.event_labels),), dtype=np.int64),
+        threshold=np.full((len(dataset.event_labels),), 0.5, dtype=np.float32),
+    )
+
+    assert transform["raw_pcoord_dim"] == 2
+    assert transform["feature_dim"] == 19
+    assert features.shape == (12, 4, 19)
+    assert np.all(features[~dataset.window_mask] == 0.0)
+    np.testing.assert_allclose(
+        transform["mean"],
+        dataset.pcoord_windows[:8][dataset.window_mask[:8]].mean(axis=0),
+    )
+
+
 def test_pcoord_lineage_training_checkpoint_scoring_and_report(tmp_path) -> None:
     artifact = _write_tiny_lineage_artifact(tmp_path / "lineage.npz")
     dataset, config = load_lineage_dataset_and_make_config(
@@ -90,6 +115,7 @@ def test_pcoord_lineage_training_checkpoint_scoring_and_report(tmp_path) -> None
         best_checkpoint,
         device="cpu",
     )
+    assert loaded_model.config.pcoord_dim > dataset.pcoord_windows.shape[-1]
     scores = score_pcoord_lineage_dataset(
         loaded_model,
         dataset,

@@ -56,6 +56,11 @@ def main() -> None:
         default=None,
         help="Optional checkpoint path to record in stride_control_config.json.",
     )
+    parser.add_argument(
+        "--stride-fusion-alpha",
+        default="0.0",
+        help="Fuse train-normalized STRIDE and baseline scores. Use 'auto' to tune alpha on train.",
+    )
     args = parser.parse_args()
 
     stride_scores = None
@@ -83,6 +88,7 @@ def main() -> None:
             score_key=args.rank_key,
             stride_scores_path=str(args.stride_scores_npz) if args.stride_scores_npz else None,
             checkpoint_path=str(args.checkpoint) if args.checkpoint else None,
+            stride_fusion_alpha=args.stride_fusion_alpha,
         ),
     )
 

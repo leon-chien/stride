@@ -74,6 +74,9 @@ class PcoordLineageDataset:
             raise ValueError("Every pcoord window must contain at least one valid frame.")
 
 
+PcoordFeatureTransform = dict[str, object]
+
+
 def load_pcoord_lineage_dataset_npz(path: str | Path) -> PcoordLineageDataset:
     data = np.load(path)
     required = (
@@ -175,6 +178,167 @@ def split_pcoord_lineage_indices(
     )
 
 
+def build_pcoord_feature_transform(
+    dataset: PcoordLineageDataset,
+    train_indices: np.ndarray,
+    mode: str = "engineered",
+) -> PcoordFeatureTransform:
+    """
+    Build train-calibrated pcoord feature normalization metadata.
+    """
+    dataset.validate()
+    if mode not in {"raw", "engineered"}:
+        raise ValueError("feature_mode must be 'raw' or 'engineered'.")
+    raw_dim = int(dataset.pcoord_windows.shape[-1])
+    if mode == "raw":
+        return {
+            "mode": "raw",
+            "raw_pcoord_dim": raw_dim,
+            "feature_dim": raw_dim,
+        }
+
+    train_indices = np.asarray(train_indices, dtype=np.int64)
+    train_windows = dataset.pcoord_windows[train_indices]
+    train_mask = dataset.window_mask[train_indices]
+    valid_values = train_windows[train_mask]
+    if valid_values.size == 0:
+        raise ValueError("Cannot build pcoord feature transform without valid train frames.")
+    mean = np.mean(valid_values, axis=0).astype(np.float32)
+    std = np.std(valid_values, axis=0).astype(np.float32)
+    std = np.maximum(std, np.float32(1e-6))
+    feature_dim = raw_dim * 8 + 3
+    return {
+        "mode": "engineered",
+        "raw_pcoord_dim": raw_dim,
+        "feature_dim": int(feature_dim),
+        "mean": mean.tolist(),
+        "std": std.tolist(),
+    }
+
+
+def transform_pcoord_lineage_dataset(
+    dataset: PcoordLineageDataset,
+    transform: PcoordFeatureTransform | None,
+) -> PcoordLineageDataset:
+    """
+    Apply raw or engineered pcoord features while preserving labels/provenance.
+    """
+    dataset.validate()
+    transform = transform or {"mode": "raw"}
+    mode = str(transform.get("mode", "raw"))
+    if mode == "raw":
+        return dataset
+    if mode != "engineered":
+        raise ValueError(f"Unknown pcoord feature transform mode: {mode}")
+
+    features = engineer_pcoord_window_features(
+        dataset.pcoord_windows,
+        dataset.window_mask,
+        transform=transform,
+        pcoord_dim=dataset.pcoord_dim,
+        threshold=dataset.threshold,
+    )
+    return PcoordLineageDataset(
+        pcoord_windows=features,
+        window_mask=dataset.window_mask,
+        goal_features=dataset.goal_features,
+        event_labels=dataset.event_labels,
+        flux_labels=dataset.flux_labels,
+        n_iter=dataset.n_iter,
+        seg_id=dataset.seg_id,
+        weights=dataset.weights,
+        cell_id=dataset.cell_id,
+        goal_id=dataset.goal_id,
+        pcoord_dim=dataset.pcoord_dim,
+        threshold=dataset.threshold,
+        horizon_iterations=dataset.horizon_iterations,
+    )
+
+
+def engineer_pcoord_window_features(
+    pcoord_windows: np.ndarray,
+    window_mask: np.ndarray,
+    transform: PcoordFeatureTransform,
+    pcoord_dim: np.ndarray | None = None,
+    threshold: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Build robust per-frame lineage features from raw pcoord histories.
+
+    Features include raw pcoord, train z-scores, temporal deltas, window summary
+    statistics, and goal-dimension distance-to-threshold features.
+    """
+    raw = np.asarray(pcoord_windows, dtype=np.float32)
+    mask = np.asarray(window_mask, dtype=bool)
+    if raw.ndim != 3:
+        raise ValueError("pcoord_windows must have shape [examples, window, dims].")
+    if mask.shape != raw.shape[:2]:
+        raise ValueError("window_mask must match pcoord_windows first two dimensions.")
+    num_examples, window, raw_dim = raw.shape
+
+    expected_raw_dim = int(transform.get("raw_pcoord_dim", raw_dim))
+    if raw_dim != expected_raw_dim:
+        raise ValueError(f"Expected raw pcoord dim {expected_raw_dim}, got {raw_dim}.")
+    mean = np.asarray(transform["mean"], dtype=np.float32)
+    std = np.asarray(transform["std"], dtype=np.float32)
+    if mean.shape != (raw_dim,) or std.shape != (raw_dim,):
+        raise ValueError("Feature transform mean/std must match raw pcoord dim.")
+    std = np.maximum(std, np.float32(1e-6))
+
+    valid_raw = np.where(mask[:, :, None], raw, 0.0).astype(np.float32)
+    z = (raw - mean[None, None, :]) / std[None, None, :]
+
+    first_indices = np.argmax(mask, axis=1)
+    last_indices = window - 1 - np.argmax(mask[:, ::-1], axis=1)
+    rows = np.arange(num_examples)
+    first_values = raw[rows, first_indices]
+    last_values = raw[rows, last_indices]
+    delta_first = raw - first_values[:, None, :]
+
+    previous = np.concatenate([first_values[:, None, :], raw[:, :-1, :]], axis=1)
+    delta_previous = raw - previous
+
+    masked_min = np.where(mask[:, :, None], raw, np.inf).min(axis=1)
+    masked_max = np.where(mask[:, :, None], raw, -np.inf).max(axis=1)
+    value_range = masked_max - masked_min
+    last_repeated = np.repeat(last_values[:, None, :], window, axis=1)
+    min_repeated = np.repeat(masked_min[:, None, :], window, axis=1)
+    max_repeated = np.repeat(masked_max[:, None, :], window, axis=1)
+    range_repeated = np.repeat(value_range[:, None, :], window, axis=1)
+
+    if pcoord_dim is not None and threshold is not None:
+        dims = np.asarray(pcoord_dim, dtype=np.int64)
+        thresholds = np.asarray(threshold, dtype=np.float32)
+        if dims.shape != (num_examples,) or thresholds.shape != (num_examples,):
+            raise ValueError("pcoord_dim and threshold must have one value per example.")
+        selected = np.take_along_axis(raw, dims[:, None, None].repeat(window, axis=1), axis=2)
+        target_delta = selected - thresholds[:, None, None]
+        target_abs = np.abs(target_delta)
+    else:
+        selected = np.zeros((num_examples, window, 1), dtype=np.float32)
+        target_delta = np.zeros_like(selected)
+        target_abs = np.zeros_like(selected)
+
+    features = np.concatenate(
+        [
+            valid_raw,
+            z,
+            delta_first,
+            delta_previous,
+            last_repeated,
+            min_repeated,
+            max_repeated,
+            range_repeated,
+            selected,
+            target_delta,
+            target_abs,
+        ],
+        axis=-1,
+    ).astype(np.float32)
+    features[~mask] = 0.0
+    return features
+
+
 def train_pcoord_lineage_value_model(
     dataset: PcoordLineageDataset,
     config: PcoordLineageModelConfig,
@@ -196,6 +360,7 @@ def train_pcoord_lineage_value_model(
     early_stopping_patience: int | None = None,
     early_stopping_min_delta: float = 0.0,
     lr_scheduler: str | None = None,
+    feature_mode: str = "engineered",
 ) -> tuple[PcoordLineageValueModel, dict[str, float]]:
     dataset.validate()
     if epochs <= 0:
@@ -204,9 +369,26 @@ def train_pcoord_lineage_value_model(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
+    train_indices, _ = split_pcoord_lineage_indices(
+        dataset,
+        validation_fraction=validation_fraction,
+        seed=seed,
+        split_strategy=split_strategy,
+    )
+    feature_transform = build_pcoord_feature_transform(dataset, train_indices, mode=feature_mode)
+    training_dataset = transform_pcoord_lineage_dataset(dataset, feature_transform)
+    config = PcoordLineageModelConfig(
+        pcoord_dim=training_dataset.pcoord_windows.shape[-1],
+        goal_feature_dim=config.goal_feature_dim,
+        hidden_dim=config.hidden_dim,
+        transformer_layers=config.transformer_layers,
+        transformer_heads=config.transformer_heads,
+        dropout=config.dropout,
+    )
+
     device_obj = resolve_device(device)
     train_loader, val_loader = _make_loaders(
-        dataset=dataset,
+        dataset=training_dataset,
         batch_size=batch_size,
         validation_fraction=validation_fraction,
         seed=seed,
@@ -214,6 +396,7 @@ def train_pcoord_lineage_value_model(
     )
 
     model = PcoordLineageValueModel(config).to(device_obj)
+    model.pcoord_feature_transform = feature_transform
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     scheduler = _make_scheduler(optimizer, lr_scheduler, epochs, save_best_mode)
     start_epoch = 1
@@ -312,6 +495,7 @@ def train_pcoord_lineage_value_model(
                         "best_metric_mode": save_best_mode,
                         "best_metric_value": best_metric_value,
                         "best_metric_epoch": epoch,
+                        "pcoord_feature_transform": feature_transform,
                     },
                     optimizer=optimizer,
                     scheduler=scheduler,
@@ -349,6 +533,7 @@ def train_pcoord_lineage_value_model(
                 "early_stopping_patience": early_stopping_patience,
                 "early_stopping_min_delta": early_stopping_min_delta,
                 "lr_scheduler": lr_scheduler or "none",
+                "pcoord_feature_transform": feature_transform,
             },
             optimizer=optimizer,
             scheduler=scheduler,
@@ -365,6 +550,8 @@ def score_pcoord_lineage_dataset(
     device: str | None = None,
 ) -> dict[str, np.ndarray]:
     dataset.validate()
+    feature_transform = getattr(model, "pcoord_feature_transform", {"mode": "raw"})
+    dataset = transform_pcoord_lineage_dataset(dataset, feature_transform)
     device_obj = resolve_device(device)
     model = model.to(device_obj)
     model.eval()
@@ -427,6 +614,10 @@ def load_pcoord_lineage_checkpoint(
     config = PcoordLineageModelConfig(**checkpoint["config"])
     model = PcoordLineageValueModel(config)
     model.load_state_dict(checkpoint["model_state_dict"])
+    model.pcoord_feature_transform = checkpoint.get("metadata", {}).get(
+        "pcoord_feature_transform",
+        {"mode": "raw"},
+    )
     model.to(device_obj)
     return model, dict(checkpoint.get("metrics", {}))
 

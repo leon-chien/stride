@@ -36,6 +36,7 @@ class ReplayConfig:
     score_key: str = "p_event"
     stride_scores_path: str | None = None
     checkpoint_path: str | None = None
+    stride_fusion_alpha: str | float = 0.0
 
 
 def assign_score_bins(
@@ -133,10 +134,18 @@ def replay_westpa_steering(
         cfg.baseline_key: baselines[cfg.baseline_key],
         "random": random_scores,
     }
+    stride_fusion_alpha: float | None = None
     if stride_scores is not None:
         stride_scores = np.asarray(stride_scores, dtype=np.float32)
         if stride_scores.shape != labels.shape:
             raise ValueError("stride_scores must have one score per lineage example.")
+        stride_scores, stride_fusion_alpha = _fuse_stride_with_baseline(
+            stride_scores,
+            baselines[cfg.baseline_key],
+            labels,
+            train_indices,
+            cfg.stride_fusion_alpha,
+        )
         rankers = {"STRIDE": stride_scores, **rankers}
 
     output_dir = Path(output_dir)
@@ -185,6 +194,8 @@ def replay_westpa_steering(
             "bin_edges": _json_list(edges),
             "num_bins": int(len(edges) + 1),
         }
+        if ranker_name == "STRIDE":
+            control_rankers[key]["baseline_fusion_alpha"] = stride_fusion_alpha
 
         metric_rows.append(
             _ranker_metrics(
@@ -275,6 +286,56 @@ def _split_indices(
     if cfg.eval_split == "validation":
         return train_indices, val_indices
     raise ValueError("eval_split must be 'all', 'train', or 'validation'.")
+
+
+def _fuse_stride_with_baseline(
+    stride_scores: np.ndarray,
+    baseline_scores: np.ndarray,
+    labels: np.ndarray,
+    train_indices: np.ndarray,
+    alpha: str | float,
+) -> tuple[np.ndarray, float]:
+    if isinstance(alpha, str) and alpha == "auto":
+        alpha_value = _select_fusion_alpha(stride_scores, baseline_scores, labels, train_indices)
+    else:
+        alpha_value = float(alpha)
+    if alpha_value == 0.0:
+        return stride_scores.astype(np.float32), alpha_value
+
+    stride_z = _train_zscore(stride_scores, train_indices)
+    baseline_z = _train_zscore(baseline_scores, train_indices)
+    return (stride_z + alpha_value * baseline_z).astype(np.float32), alpha_value
+
+
+def _select_fusion_alpha(
+    stride_scores: np.ndarray,
+    baseline_scores: np.ndarray,
+    labels: np.ndarray,
+    train_indices: np.ndarray,
+) -> float:
+    stride_z = _train_zscore(stride_scores, train_indices)
+    baseline_z = _train_zscore(baseline_scores, train_indices)
+    grid = (0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0)
+    best_alpha = 0.0
+    best_auprc = -np.inf
+    train_labels = labels[train_indices]
+    for alpha in grid:
+        scores = stride_z[train_indices] + alpha * baseline_z[train_indices]
+        auprc = compute_binary_metrics(train_labels, scores)["auprc"]
+        if np.isfinite(auprc) and auprc > best_auprc:
+            best_auprc = auprc
+            best_alpha = float(alpha)
+    return best_alpha
+
+
+def _train_zscore(values: np.ndarray, train_indices: np.ndarray) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    reference = values[np.asarray(train_indices, dtype=np.int64)]
+    mean = float(np.mean(reference))
+    std = float(np.std(reference))
+    if std < 1e-6:
+        std = 1.0
+    return ((values - mean) / std).astype(np.float32)
 
 
 def _ranker_metrics(
@@ -615,6 +676,7 @@ def _write_control_config(
         "train_examples": int(train_count),
         "eval_examples": int(eval_count),
         "rankers": rankers,
+        "stride_fusion_alpha": cfg.stride_fusion_alpha,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

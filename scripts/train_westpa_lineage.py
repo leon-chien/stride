@@ -95,6 +95,12 @@ def main() -> None:
         default="none",
         help="Optional learning-rate scheduler.",
     )
+    parser.add_argument(
+        "--feature-mode",
+        choices=("engineered", "raw"),
+        default="engineered",
+        help="Use train-normalized pcoord history features or raw pcoord windows.",
+    )
     args = parser.parse_args()
 
     dataset, config = load_lineage_dataset_and_make_config(
@@ -154,6 +160,7 @@ def main() -> None:
         "early_stopping_patience": args.early_stopping_patience,
         "early_stopping_min_delta": args.early_stopping_min_delta,
         "lr_scheduler": args.lr_scheduler,
+        "feature_mode": args.feature_mode,
     }
     _, metrics = train_pcoord_lineage_value_model(
         dataset=dataset,
@@ -176,6 +183,7 @@ def main() -> None:
         early_stopping_patience=args.early_stopping_patience,
         early_stopping_min_delta=args.early_stopping_min_delta,
         lr_scheduler=args.lr_scheduler,
+        feature_mode=args.feature_mode,
     )
 
     print(f"Final checkpoint: {args.checkpoint}")

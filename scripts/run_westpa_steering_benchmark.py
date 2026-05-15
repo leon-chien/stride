@@ -33,6 +33,8 @@ def main() -> None:
     parser.add_argument("--num-bins", type=int, default=8)
     parser.add_argument("--binning", choices=("quantile", "fixed"), default="quantile")
     parser.add_argument("--bin-reference", choices=("train", "eval"), default="train")
+    parser.add_argument("--feature-mode", choices=("engineered", "raw"), default="engineered")
+    parser.add_argument("--stride-fusion-alpha", default="auto")
     parser.add_argument("--early-stopping-patience", type=int, default=8)
     args = parser.parse_args()
 
@@ -77,6 +79,8 @@ def main() -> None:
             "max",
             "--early-stopping-patience",
             str(args.early_stopping_patience),
+            "--feature-mode",
+            args.feature_mode,
         ]
     )
     _run(
@@ -139,6 +143,8 @@ def main() -> None:
             "--per-iteration",
             "--checkpoint",
             str(best_checkpoint),
+            "--stride-fusion-alpha",
+            str(args.stride_fusion_alpha),
             "--output-dir",
             str(replay_report_dir),
         ]
