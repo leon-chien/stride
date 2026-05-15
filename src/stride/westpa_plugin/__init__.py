@@ -21,6 +21,7 @@ from stride.westpa_plugin.runtime_scorer import (
 from stride.westpa_plugin.steering_replay import (
     ReplayConfig,
     assign_score_bins,
+    assign_score_bins_from_edges,
     priority_ranks,
     replay_westpa_steering,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "build_segment_coordinate_store",
     "compute_delayed_labels",
     "assign_score_bins",
+    "assign_score_bins_from_edges",
     "load_segment_coordinate_store_npz",
     "load_segment_records",
     "priority_ranks",

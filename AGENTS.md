@@ -165,7 +165,9 @@ recent lineage window at iteration t
 ## Environment Notes
 
 - The active base Python in this shell may not have project dependencies.
-- The `stride` conda environment has the current test dependencies available:
+- Local development uses the `stride` conda environment. The remote training
+  server uses micromamba, so replace `conda run -n stride` with
+  `micromamba run -n stride` in remote commands.
 
 ```bash
 conda run -n stride python ...
@@ -186,7 +188,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-49 passed
+52 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -260,12 +262,21 @@ and `scripts/evaluate_westpa_lineage.py` support `heldout_goal` and
 WESTPA steering replay example:
 
 ```bash
-conda run -n stride python scripts/replay_westpa_steering.py outputs/tutorial35_multigoal.npz --stride-scores-npz outputs/tutorial35_multigoal_scores.npz --rank-key p_event --baseline-key last_pcoord_low --eval-split validation --iteration-split-strategy tail --validation-fraction 0.2 --num-bins 8 --binning quantile --output-dir outputs/reports/tutorial35_multigoal_steering_replay
+micromamba run -n stride python scripts/replay_westpa_steering.py outputs/tutorial35_multigoal.npz --stride-scores-npz outputs/tutorial35_multigoal_scores.npz --rank-key p_event --baseline-key last_pcoord_low --eval-split validation --iteration-split-strategy tail --validation-fraction 0.2 --num-bins 8 --binning quantile --bin-reference train --per-iteration --output-dir outputs/reports/tutorial35_multigoal_steering_replay_train_bins
 ```
 
 Replay reports answer the steering-readiness question: whether STRIDE would
 prioritize better held-out walkers than simple pcoord ranking. The assignment
-artifact is the WESTPA-facing handoff for live integration experiments.
+artifact and `stride_control_config.json` are the WESTPA-facing handoff for live
+integration experiments. Use `--bin-reference train` for deployment-realistic
+frozen bins; `--bin-reference eval` is only a diagnostic mode.
+
+End-to-end steering benchmark wrapper:
+
+```bash
+micromamba run -n stride python scripts/run_westpa_steering_benchmark.py outputs/tutorial35_multigoal.npz outputs/tutorial35_multigoal_heldout_cell --mode heldout_cell --device cuda
+micromamba run -n stride python scripts/run_westpa_steering_benchmark.py outputs/tutorial35_multigoal.npz outputs/tutorial35_multigoal_heldout_goal --mode heldout_goal --device cuda
+```
 
 WESTPA segment coordinate store example:
 

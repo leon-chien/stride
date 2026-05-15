@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 
 import numpy as np
 
@@ -11,6 +12,7 @@ from stride.westpa_plugin import (
     PcoordRuntimeScoringInput,
     ReplayConfig,
     assign_score_bins,
+    assign_score_bins_from_edges,
     priority_ranks,
     replay_westpa_steering,
 )
@@ -87,6 +89,93 @@ def test_replay_preserves_tail_validation_iterations(tmp_path) -> None:
     assert assignments["stride_priority_rank"].min() == 1
 
 
+def test_replay_train_calibrated_bins_use_only_train_indices(tmp_path) -> None:
+    artifact = _write_tiny_multigoal_artifact(tmp_path / "lineage.npz")
+    stride_scores = np.arange(24, dtype=np.float32)
+
+    paths = replay_westpa_steering(
+        artifact,
+        tmp_path / "replay",
+        stride_scores=stride_scores,
+        config=ReplayConfig(
+            eval_split="validation",
+            split_strategy="tail",
+            validation_fraction=0.25,
+            num_bins=4,
+            bin_reference="train",
+        ),
+    )
+
+    assignments = np.load(paths["assignments"])
+    expected_edges = np.unique(np.quantile(stride_scores[:16], [0.25, 0.5, 0.75])).astype(
+        np.float32
+    )
+    eval_scores = stride_scores[assignments["eval_indices"]]
+    np.testing.assert_allclose(assignments["stride_bin_edges"], expected_edges)
+    np.testing.assert_array_equal(
+        assignments["stride_bin"],
+        assign_score_bins_from_edges(eval_scores, expected_edges),
+    )
+    assert np.all(assignments["calibration_indices"] < 16)
+
+
+def test_replay_per_iteration_metrics_do_not_mix_iterations(tmp_path) -> None:
+    artifact = _write_tiny_multigoal_artifact(tmp_path / "lineage.npz")
+    stride_scores = np.linspace(0.0, 1.0, 24, dtype=np.float32)
+
+    paths = replay_westpa_steering(
+        artifact,
+        tmp_path / "replay",
+        stride_scores=stride_scores,
+        config=ReplayConfig(
+            eval_split="validation",
+            split_strategy="tail",
+            validation_fraction=0.25,
+            num_bins=4,
+            bin_reference="train",
+            per_iteration=True,
+        ),
+    )
+
+    iteration_rows = _read_csv(paths["iteration_metrics"])
+    stride_rows = [row for row in iteration_rows if row["ranker"] == "STRIDE"]
+    assert {float(row["n_iter"]) for row in stride_rows} == {5.0, 6.0}
+    assert all(float(row["count"]) == 4.0 for row in stride_rows)
+
+    summary_rows = _read_csv(paths["iteration_summary"])
+    assert any(row["ranker"] == "STRIDE" for row in summary_rows)
+    assert "Per-Iteration Summary" in paths["markdown"].read_text()
+
+
+def test_replay_writes_deployment_control_config(tmp_path) -> None:
+    artifact = _write_tiny_multigoal_artifact(tmp_path / "lineage.npz")
+    stride_scores = np.linspace(0.0, 1.0, 24, dtype=np.float32)
+
+    paths = replay_westpa_steering(
+        artifact,
+        tmp_path / "replay",
+        stride_scores=stride_scores,
+        config=ReplayConfig(
+            eval_split="validation",
+            split_strategy="tail",
+            validation_fraction=0.25,
+            num_bins=4,
+            bin_reference="train",
+            per_iteration=True,
+            score_key="p_event",
+            stride_scores_path="outputs/scores.npz",
+            checkpoint_path="outputs/model.best.pt",
+        ),
+    )
+
+    payload = json.loads(paths["control_config"].read_text())
+    assert payload["bin_reference"] == "train"
+    assert payload["checkpoint_path"] == "outputs/model.best.pt"
+    assert payload["stride_scores_npz"] == "outputs/scores.npz"
+    assert payload["rankers"]["stride"]["score_key"] == "p_event"
+    assert len(payload["rankers"]["stride"]["bin_edges"]) == 3
+
+
 def test_replay_outputs_diagnostics_for_rare_single_class_groups(tmp_path) -> None:
     artifact = _write_tiny_multigoal_artifact(tmp_path / "lineage.npz", rare_single_class=True)
     stride_scores = np.linspace(0.0, 1.0, 24, dtype=np.float32)
@@ -107,10 +196,12 @@ def test_replay_outputs_diagnostics_for_rare_single_class_groups(tmp_path) -> No
     assert paths["metrics"].exists()
     assert paths["bins"].exists()
     assert paths["grouped_metrics"].exists()
+    assert paths["iteration_metrics"].exists()
+    assert paths["control_config"].exists()
 
     metric_rows = _read_csv(paths["metrics"])
     grouped_rows = _read_csv(paths["grouped_metrics"])
-    assert {row["ranker"] for row in metric_rows} == {"STRIDE", "last_pcoord_low"}
+    assert {row["ranker"] for row in metric_rows} == {"STRIDE", "last_pcoord_low", "random"}
     assert any(row["group_type"] == "goal_id" for row in grouped_rows)
     assert "STRIDE beats" in paths["markdown"].read_text() or "STRIDE does not beat" in paths[
         "markdown"

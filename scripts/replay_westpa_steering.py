@@ -38,7 +38,24 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--num-bins", type=int, default=8)
     parser.add_argument("--binning", choices=("quantile", "fixed"), default="quantile")
+    parser.add_argument(
+        "--bin-reference",
+        choices=("train", "eval"),
+        default="train",
+        help="Use train-calibrated frozen bins or recalibrate on the evaluated examples.",
+    )
+    parser.add_argument(
+        "--per-iteration",
+        action="store_true",
+        help="Compute live-like steering metrics separately within each held-out iteration.",
+    )
     parser.add_argument("--pcoord-dim", type=int, default=0)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Optional checkpoint path to record in stride_control_config.json.",
+    )
     args = parser.parse_args()
 
     stride_scores = None
@@ -59,8 +76,13 @@ def main() -> None:
             seed=args.seed,
             num_bins=args.num_bins,
             binning=args.binning,
+            bin_reference=args.bin_reference,
+            per_iteration=args.per_iteration,
             pcoord_dim=args.pcoord_dim,
             baseline_key=args.baseline_key,
+            score_key=args.rank_key,
+            stride_scores_path=str(args.stride_scores_npz) if args.stride_scores_npz else None,
+            checkpoint_path=str(args.checkpoint) if args.checkpoint else None,
         ),
     )
 
@@ -71,7 +93,10 @@ def main() -> None:
     print(f"Metrics: {paths['metrics']}")
     print(f"Bin occupancy: {paths['bins']}")
     print(f"Grouped metrics: {paths['grouped_metrics']}")
+    print(f"Iteration metrics: {paths['iteration_metrics']}")
+    print(f"Iteration summary: {paths['iteration_summary']}")
     print(f"WESTPA arrays: {paths['assignments']}")
+    print(f"Control config: {paths['control_config']}")
 
 
 if __name__ == "__main__":
