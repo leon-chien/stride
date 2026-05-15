@@ -54,6 +54,17 @@ Current repository foundation:
 - A `StrideRuntimeScorer` adapter that scores active atomistic walker histories
   with a checkpoint and falls back to configured scalar scores if model loading
   or scoring fails.
+- A `PcoordLineageRuntimeScorer` adapter that scores active pcoord lineage
+  histories with a pcoord-lineage checkpoint and uses the same fallback score
+  contract.
+- WESTPA steering replay tooling:
+  - `scripts/replay_westpa_steering.py` compares STRIDE walker priorities and
+    bins against simple pcoord control baselines on held-out WESTPA artifacts.
+  - Outputs WESTPA-facing arrays: `stride_score`, `stride_bin`, and
+    `stride_priority_rank`.
+  - Writes steering diagnostics for top-k enrichment, bin occupancy,
+    positive-event gradients, score/label correlation, and per-goal/per-cell
+    groups.
 - Canonical atomistic STRIDE dataset utilities in `src/stride/data/atomistic.py`
   for coordinate windows, atom/residue features, atom masks, frame masks, goal
   features, proxy event labels, and `.npz` save/load.
@@ -175,7 +186,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-44 passed
+49 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -245,6 +256,16 @@ Multi-goal lineage artifacts include `cell_id`, `goal_id`, `pcoord_dim`,
 `threshold`, and `horizon_iterations` metadata. `scripts/train_westpa_lineage.py`
 and `scripts/evaluate_westpa_lineage.py` support `heldout_goal` and
 `heldout_cell` split strategies for generalization checks.
+
+WESTPA steering replay example:
+
+```bash
+conda run -n stride python scripts/replay_westpa_steering.py outputs/tutorial35_multigoal.npz --stride-scores-npz outputs/tutorial35_multigoal_scores.npz --rank-key p_event --baseline-key last_pcoord_low --eval-split validation --iteration-split-strategy tail --validation-fraction 0.2 --num-bins 8 --binning quantile --output-dir outputs/reports/tutorial35_multigoal_steering_replay
+```
+
+Replay reports answer the steering-readiness question: whether STRIDE would
+prioritize better held-out walkers than simple pcoord ranking. The assignment
+artifact is the WESTPA-facing handoff for live integration experiments.
 
 WESTPA segment coordinate store example:
 

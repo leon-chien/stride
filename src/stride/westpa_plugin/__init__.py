@@ -12,9 +12,17 @@ from stride.westpa_plugin.h5_reader import (
     save_westpa_atomistic_dataset_npz,
 )
 from stride.westpa_plugin.runtime_scorer import (
+    PcoordLineageRuntimeScorer,
+    PcoordRuntimeScoringInput,
     RuntimeScoringInput,
     RuntimeScoringResult,
     StrideRuntimeScorer,
+)
+from stride.westpa_plugin.steering_replay import (
+    ReplayConfig,
+    assign_score_bins,
+    priority_ranks,
+    replay_westpa_steering,
 )
 from stride.westpa_plugin.multigoal import (
     MultiGoalBuildReport,
@@ -31,6 +39,9 @@ from stride.westpa_plugin.value_mapper import StrideValueBinMapper, ValueMapperC
 __all__ = [
     "DelayedLabel",
     "LineageWindow",
+    "PcoordLineageRuntimeScorer",
+    "PcoordRuntimeScoringInput",
+    "ReplayConfig",
     "RuntimeScoringInput",
     "RuntimeScoringResult",
     "MultiGoalBuildReport",
@@ -46,8 +57,11 @@ __all__ = [
     "build_multigoal_lineage_dataset_from_yaml",
     "build_segment_coordinate_store",
     "compute_delayed_labels",
+    "assign_score_bins",
     "load_segment_coordinate_store_npz",
     "load_segment_records",
+    "priority_ranks",
+    "replay_westpa_steering",
     "save_segment_coordinate_store_npz",
     "save_westpa_atomistic_dataset_npz",
     "segment_trajectory_path",
