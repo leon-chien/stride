@@ -11,6 +11,13 @@ from stride.westpa_plugin.h5_reader import (
     load_segment_records,
     save_westpa_atomistic_dataset_npz,
 )
+from stride.westpa_plugin.controller import ControllerAssignment, StrideWestpaController
+from stride.westpa_plugin.online_store import (
+    OnlineLineageStore,
+    OnlineStoreSummary,
+    concatenate_pcoord_lineage_datasets,
+)
+from stride.westpa_plugin.promotion import PromotionDecision, decide_promotion
 from stride.westpa_plugin.runtime_scorer import (
     PcoordLineageRuntimeScorer,
     PcoordRuntimeScoringInput,
@@ -39,7 +46,10 @@ from stride.westpa_plugin.value_mapper import StrideValueBinMapper, ValueMapperC
 
 __all__ = [
     "DelayedLabel",
+    "ControllerAssignment",
     "LineageWindow",
+    "OnlineLineageStore",
+    "OnlineStoreSummary",
     "PcoordLineageRuntimeScorer",
     "PcoordRuntimeScoringInput",
     "ReplayConfig",
@@ -52,12 +62,15 @@ __all__ = [
     "SegmentRecord",
     "StrideValueBinMapper",
     "StrideRuntimeScorer",
+    "StrideWestpaController",
     "ValueMapperConfig",
     "build_coordinate_atomistic_dataset",
     "build_lineage_windows",
     "build_multigoal_lineage_dataset_from_yaml",
     "build_segment_coordinate_store",
     "compute_delayed_labels",
+    "concatenate_pcoord_lineage_datasets",
+    "decide_promotion",
     "assign_score_bins",
     "assign_score_bins_from_edges",
     "load_segment_coordinate_store_npz",

@@ -65,6 +65,17 @@ Current repository foundation:
   - Writes steering diagnostics for top-k enrichment, bin occupancy,
     positive-event gradients, score/label correlation, and per-goal/per-cell
     groups.
+- Product-facing WESTPA control scaffolding:
+  - `StrideWestpaController` loads `stride_control_config.json`, scores active
+    pcoord histories, assigns frozen bins, and falls back to pcoord baseline
+    bins when scoring fails.
+  - `OnlineLineageStore` appends/reloads pcoord lineage data for adaptive runs.
+  - `decide_promotion` implements champion/challenger promotion checks.
+  - `scripts/update_stride_online.py` trains a challenger from a lineage
+    artifact, replays it, and writes a promotion decision.
+- Optional atomistic encoder interface:
+  - `FrozenPretrainedFrameEncoder` wraps mockable pretrained geometric encoders
+    without making heavy pretrained-model dependencies required.
 - Canonical atomistic STRIDE dataset utilities in `src/stride/data/atomistic.py`
   for coordinate windows, atom/residue features, atom masks, frame masks, goal
   features, proxy event labels, and `.npz` save/load.
@@ -188,7 +199,7 @@ conda run -n stride pytest tests
 Current expected result:
 
 ```text
-53 passed
+58 passed
 ```
 
 Local smoke-test artifacts can be regenerated with:
@@ -283,6 +294,17 @@ raw pcoord, train-normalized pcoord, temporal deltas, window summary features,
 and goal-threshold distance features. It also defaults replay to
 `--stride-fusion-alpha auto`, which tunes a train-only residual blend of STRIDE
 and the chosen pcoord baseline for steering replay.
+
+Online challenger update example:
+
+```bash
+micromamba run -n stride python scripts/update_stride_online.py outputs/tutorial35_multigoal.npz outputs/tutorial35_online_challenger --mode tail --device cuda
+```
+
+This is the current fast-track product path: pcoord baseline controls safely at
+first, STRIDE challengers are trained from accumulated lineage data, and a
+challenger is promoted only if replay metrics beat the pcoord baseline and any
+current champion.
 
 WESTPA segment coordinate store example:
 
