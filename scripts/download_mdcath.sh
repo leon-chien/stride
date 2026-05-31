@@ -38,11 +38,23 @@ while IFS= read -r domain; do
   INCLUDES+=("--include" "data/mdcath_dataset_${domain}.h5")
 done < "$DOMAINS"
 
-huggingface-cli download compsciencelab/mdCATH \
+download_rc=0
+uv run hf download compsciencelab/mdCATH \
   --repo-type dataset \
   --revision "$REVISION" \
   --local-dir "$OUT" \
-  "${INCLUDES[@]}"
+  "${INCLUDES[@]}" || download_rc=$?
+
+missing=0
+[[ -f "$OUT/mdcath_source.h5" ]] || missing=1
+while IFS= read -r domain; do
+  [[ -z "$domain" || "$domain" =~ ^# ]] && continue
+  [[ -f "$OUT/data/mdcath_dataset_${domain}.h5" ]] || missing=1
+done < "$DOMAINS"
+
+if [[ "$missing" -ne 0 ]]; then
+  exit "$download_rc"
+fi
 
 {
   echo "# Data Provenance"

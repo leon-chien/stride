@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python - <<'PY'
+uv run python - <<'PY'
 import sys
 
 if sys.platform != "linux":
@@ -11,6 +11,7 @@ if sys.version_info[:2] != (3, 11):
 PY
 
 uv pip install \
+  --no-build-isolation \
   "mamba-ssm==1.2.*" \
   "causal-conv1d==1.2.*"
 
