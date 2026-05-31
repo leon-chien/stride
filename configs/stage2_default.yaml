@@ -1,0 +1,20 @@
+seed: 0
+precision: bf16-mixed
+data:
+  window_frames: 64
+  max_residues: 320
+model:
+  encoder: gvp
+  encoder_lr_multiplier: 0.1
+  temporal: mamba
+  temporal_dim: 128
+  mamba_layers: 2
+  attention_window_frames: 128
+training:
+  batch_size: 64
+  gradient_accumulation: 1
+  learning_rate: 0.0001
+heads:
+  vamp_resolution: 16
+  vamp_aux_weight: 0.1
+  laplace_refresh_epochs: 1

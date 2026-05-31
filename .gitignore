@@ -149,6 +149,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -205,6 +207,17 @@ tempCodeRunnerFile.py
 
 # Ruff stuff:
 .ruff_cache/
+
+# STRIDE local artifacts
+stride-data/
+models/
+wandb/
+*.zarr/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.faiss
 
 # PyPI configuration file
 .pypirc

@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride"
+version = "0.0.0"
+description = "Adaptive Trajectory Learning and Scheduling for Protein Molecular Dynamics."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "STRIDE contributors" }]
+dependencies = [
+    "h5py>=3.11",
+    "numpy>=1.26,<3",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1",
+    "pyyaml>=6",
+    "rich>=13",
+    "tqdm>=4.66",
+    "typer>=0.12",
+]
+
+[project.scripts]
+stride = "stride.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "pre-commit>=3.7",
+    "pyright>=1.1.380",
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.6",
+]
+cpu = [
+    "dask>=2024.5",
+    "deeptime>=0.4",
+    "faiss-cpu>=1.8",
+    "freesasa>=2.2",
+    "huggingface-hub>=0.24",
+    "matplotlib>=3.9",
+    "mdanalysis>=2.7",
+    "mdtraj>=1.10",
+    "pandas>=2.2",
+    "plotly>=5.22",
+    "safetensors>=0.4",
+    "scikit-learn>=1.5",
+    "torch==2.4.*",
+    "torch-geometric>=2.5",
+    "wandb>=0.17",
+    "zarr>=3.1,<4",
+]
+cuda = [
+    "dask>=2024.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "deeptime>=0.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "freesasa>=2.2; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "huggingface-hub>=0.24; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "laplace-torch>=0.2; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "lightning-fabric>=2.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "matplotlib>=3.9; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "mdanalysis>=2.7; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "mdtraj>=1.10; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "openmm>=8.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "pandas>=2.2; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "plotly>=5.22; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "ray[default]>=2.30; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "safetensors>=0.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "scikit-learn>=1.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "torch==2.4.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "torch-geometric>=2.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "wandb>=0.17; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "zarr>=3.1,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+conflicts = [[{ group = "cpu" }, { group = "cuda" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", group = "cuda" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+reportArgumentType = false
+reportAttributeAccessIssue = false
+reportCallIssue = false
+reportIndexIssue = false
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "needs_gpu: tests that require a CUDA GPU",
+    "slow: tests that take significant wall time",
+]
