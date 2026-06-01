@@ -48,4 +48,29 @@ uv run stride validate-stage-a \
   --domains configs/mdcath_tier1_domains.txt
 ```
 
+
+## Checks
+
+The repo has lightweight CPU-only GitHub Actions CI for pushes and pull requests to `main`. It runs:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+bash -n scripts/*.sh
+```
+
+Stage A0 smoke labels can be generated on the 4080 without starting full Tier 1:
+
+```bash
+uv run stride pretrain-vampnets \
+  --data "$STRIDE_DATA_ROOT/stride-data-tier1" \
+  --out "$STRIDE_DATA_ROOT/stride-data-tier1-label-smoke" \
+  --domains configs/mdcath_smoke_domains.txt \
+  --resolutions 4,16,64 \
+  --max-domains 1 \
+  --force
+```
+
 Per-sub-stage commit/push ritual (run this every time you finish a numbered sub-stage like §1.1, §1.2, §2.1, …) is documented in IMPLEMENTATION.md → "Per-step ritual" section.

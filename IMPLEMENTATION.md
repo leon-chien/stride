@@ -154,11 +154,17 @@ Implement `stride pretrain-vampnets`:
 - `vampnet_health` gate: VAMP-2 score on held-out lag time vs random-projection baseline. Failure → automatic TICA fallback for that protein.
 - Emits per-protein label tensors `labels/{protein_id}/vamp_{N}.npy` and a `vampnet_manifest.json`
 
+**Current pilot status:**
+- `stride pretrain-vampnets` is implemented for Tier 1 validation using processed Stage A Zarr.
+- The pilot emits `labels/{domain_id}/vamp_{N}.npy` and `vampnet_manifest.json`.
+- The first implementation uses deeptime TICA embeddings plus MiniBatchKMeans state assignment, with a VAMP-style health score against a random-projection baseline and documented TICA+k-means fallback when the health gate fails.
+- A 4080 smoke run on `12asA00` with N in {4, 16, 64} passed and wrote labels under `$STRIDE_DATA_ROOT/stride-data-tier1-label-smoke`.
+- Full Tier 1, Tier 2, and A100 label generation remain gated on explicit approval.
+
 **Test:**
-- Implied-timescales plot converges (ITS within 10% across last 3 lag-time evaluations) for ≥ 80% of Tier 1 proteins.
-- Chapman–Kolmogorov test passes for ≥ 70% of Tier 1 proteins at the chosen lag.
-- Alanine dipeptide VAMPnet recovers (φ, ψ) basins (AMI vs ground-truth tICA labels ≥ 0.5 bits over random).
-- Run on a 4080 first with 1 protein to validate pipeline → push → pull on A100 → run at scale.
+- Unit tests cover synthetic label emission, manifest creation, and existing-manifest refusal without `--force`.
+- Smoke run on the 4080 with 1 protein validates real Zarr I/O and label artifact layout.
+- Full Tier 1 science gates remain for the later A100 run: ITS convergence for ≥ 80% of Tier 1 proteins, CK-test pass for ≥ 70%, and alanine dipeptide basin recovery.
 
 ### 1.4 Lock the headline protocol (laptop, ~3 days)
 

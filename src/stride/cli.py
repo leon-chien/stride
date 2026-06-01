@@ -8,6 +8,8 @@ from rich import print_json
 from stride.config import StrideSettings
 from stride.data.preprocess import PreprocessConfig, preprocess_mdcath
 from stride.data.validation import StageAValidationConfig, validate_stage_a
+from stride.labeling.vampnets import VampnetPretrainConfig
+from stride.labeling.vampnets import pretrain_vampnets as run_pretrain_vampnets
 
 app = typer.Typer(
     add_completion=False,
@@ -111,10 +113,38 @@ def validate_stage_a_command(
 def pretrain_vampnets(
     data: Annotated[Path | None, typer.Option(help="Processed STRIDE data root.")] = None,
     out: Annotated[Path | None, typer.Option(help="Label output directory.")] = None,
+    domains: Annotated[
+        Path | None,
+        typer.Option(help="Optional text file with one processed domain ID per line."),
+    ] = None,
+    resolutions: Annotated[
+        str,
+        typer.Option(help="Comma-separated state resolutions to emit."),
+    ] = "4,16,64",
+    max_domains: Annotated[
+        int | None,
+        typer.Option(help="Optional cap for smoke validation runs."),
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Overwrite an existing label manifest.")] = False,
 ) -> None:
     """Stage A0: fit per-topology VAMPnet labels."""
-    _ = data, out
-    _not_implemented("pretrain-vampnets")
+    settings = StrideSettings()
+    resolved_data = data or settings.data_root / "stride-data"
+    resolved_out = out or resolved_data / "labels"
+    resolution_values = tuple(
+        int(value.strip()) for value in resolutions.split(",") if value.strip()
+    )
+    result = run_pretrain_vampnets(
+        VampnetPretrainConfig(
+            data_root=resolved_data,
+            out_root=resolved_out,
+            domains_path=domains,
+            resolutions=resolution_values,
+            max_domains=max_domains,
+            force=force,
+        )
+    )
+    print_json(data=result)
 
 
 @app.command()
