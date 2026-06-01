@@ -7,6 +7,7 @@ from rich import print_json
 
 from stride.config import StrideSettings
 from stride.data.preprocess import PreprocessConfig, preprocess_mdcath
+from stride.data.validation import StageAValidationConfig, validate_stage_a
 
 app = typer.Typer(
     add_completion=False,
@@ -76,6 +77,34 @@ def preprocess(
         )
     )
     print_json(data=result)
+
+
+@app.command("validate-stage-a")
+def validate_stage_a_command(
+    data: Annotated[Path | None, typer.Option(help="Processed STRIDE data root.")] = None,
+    input_root: Annotated[Path | None, typer.Option(help="mdCATH HDF5 input root.")] = None,
+    domains: Annotated[
+        Path,
+        typer.Option(help="Text file with one mdCATH domain ID per line."),
+    ] = Path("configs/mdcath_tier1_domains.txt"),
+    benchmark_windows: Annotated[
+        int,
+        typer.Option(help="Number of deterministic random Zarr windows to read."),
+    ] = 100,
+) -> None:
+    """Validate Stage A mdCATH Zarr outputs against real/raw payloads."""
+    settings = StrideSettings()
+    result = validate_stage_a(
+        StageAValidationConfig(
+            data_root=data or settings.data_root / "stride-data",
+            input_root=input_root or settings.data_root / "mdcath_raw",
+            domains_path=domains,
+            benchmark_windows=benchmark_windows,
+        )
+    )
+    print_json(data=result)
+    if not result["passed"]:
+        raise typer.Exit(1)
 
 
 @app.command("pretrain-vampnets")

@@ -9,6 +9,7 @@ def test_cli_help_lists_documented_commands() -> None:
     assert result.exit_code == 0
     for command in [
         "preprocess",
+        "validate-stage-a",
         "pretrain-vampnets",
         "train",
         "evaluate",

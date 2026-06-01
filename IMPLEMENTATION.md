@@ -142,6 +142,8 @@ Current pilot status:
 - Total compressed output ~620 GB primary + ~200 GB sidechain auxiliary on a 2 TB NVMe.
 - Random-window load benchmark: `(traj, t_start, W=64)` returns in p50 < 50 ms, p99 < 200 ms.
 
+`stride validate-stage-a` checks real C-alpha fp16 round-trip RMSD, manifest hash determinism, domain-list consistency, and deterministic random-window Zarr read latency for processed Stage A outputs.
+
 ### 1.3 Stage A0 — VAMPnet labels (A100, ~1 week wall, ~10 GPU-days)
 
 Implement `stride pretrain-vampnets`:

@@ -39,4 +39,13 @@ uv run stride preprocess \
 
 For a fast smoke run, use `configs/mdcath_smoke_domains.txt` instead of the Tier 1 list. The converter writes `coords.zarr`, `features.zarr`, `residue_mask.zarr`, `metadata.parquet`, `manifest.json`, and `splits/by_topology.json`.
 
+Validate a completed Stage A output with real-data round-trip, manifest determinism, and random-window read checks:
+
+```bash
+uv run stride validate-stage-a \
+  --data "$STRIDE_DATA_ROOT/stride-data-tier1" \
+  --input-root "$STRIDE_DATA_ROOT/mdcath_raw" \
+  --domains configs/mdcath_tier1_domains.txt
+```
+
 Per-sub-stage commit/push ritual (run this every time you finish a numbered sub-stage like §1.1, §1.2, §2.1, …) is documented in IMPLEMENTATION.md → "Per-step ritual" section.
